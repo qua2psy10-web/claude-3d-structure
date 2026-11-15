@@ -190,7 +190,7 @@ button.b:disabled{opacity:.45;cursor:default}
           <label class="f" id="eRL">平面曲線半径 (mm、0=直線)<input type="number" id="eR" step="1000"></label>
           <label class="f" id="eSk1L">始端の斜角 (°、90=直角)<input type="number" id="eSk1" min="20" max="160"></label>
           <label class="f" id="eSk2L">終端の斜角 (°、90=直角)<input type="number" id="eSk2" min="20" max="160"></label>
-          <label class="f" id="eS0L">線形上の開始位置 (mm)<input type="number" id="eS0" min="0" step="1000"></label>
+          <label class="f" id="eS0L">線形上の開始位置 (mm)<input type="number" id="eS0" step="1000"></label>
           <label class="f" id="eLs1L">緩和曲線長・始端 (mm)<input type="number" id="eLs1" min="0" step="1000"></label>
           <label class="f" id="eLs2L">緩和曲線長・終端 (mm)<input type="number" id="eLs2" min="0" step="1000"></label>
           <label class="f" id="eG1L">縦断勾配・始端 (%)<input type="number" id="eG1" step="0.1"></label>
@@ -217,7 +217,7 @@ button.b:disabled{opacity:.45;cursor:default}
         <label class="f" id="ePts2L">終端側の輪郭（変断面にするとき。始端と同じ点数・同じ順番で入力。空欄なら等断面）
           <textarea id="ePts2" spellcheck="false"></textarea>
         </label>
-        <div class="row"><button class="b pri" id="eApply">座標を反映</button><button class="b" id="eCopy2">始端の輪郭を終端側へ写す</button><button class="b" id="eDup">複製</button></div>
+        <div class="row"><button class="b pri" id="eApply">座標を反映</button><button class="b" id="eFocus">この部材に寄る</button><button class="b" id="eCopy2">始端の輪郭を終端側へ写す</button><button class="b" id="eDup">複製</button></div>
       </div>
       <p id="pempty">部材はまだありません。「寸法入力」か「図面トレース」で作成してください。</p>
     </div>
@@ -287,10 +287,10 @@ function partGeom(p){
   else secs=[{t:0,pts:M(prof(p))},{t:1,pts:M(b||prof(p))}];
   if(sarea(secs[0].pts)<0) secs.forEach(x=>x.pts.reverse());
   const holes=p.holes.map(M).map(h=>sarea(h)>0?h.slice().reverse():h);
-  const d=p.depth/1000, L=p.depth, k1=skewOf(p,'sk1'), k2=skewOf(p,'sk2'), s0=p.up?0:Math.max(0,+p.s0||0), A=alignOf(p.up?NOALN:p,s0+L); // s0: 線形の起点からこの部材の始端までの距離
+  const d=p.depth/1000, L=p.depth, k1=skewOf(p,'sk1'), k2=skewOf(p,'sk2'), s0=p.up?0:(+p.s0||0), A=alignOf(p.up?NOALN:p,Math.max(1,s0+L)); // s0: 線形の起点からこの部材の始端までの距離
   const set=new Set(secs.map(x=>Math.round(x.t*1e5)/1e5)); set.add(0); set.add(1);
   A.breaks.forEach(x=>{ if(x>s0&&x<s0+L) set.add(Math.round((x-s0)/L*1e5)/1e5); });
-  if(A.bend){ const n=Math.min(240,Math.max(2,Math.ceil(A.turn*L/(s0+L)/(Math.PI/60)),Math.ceil(d/2.5))); for(let i=1;i<n;i++) set.add(Math.round(i/n*1e5)/1e5); }
+  if(A.bend){ const n=Math.min(240,Math.max(2,Math.ceil(A.turn*L/Math.max(L,s0+L)/(Math.PI/60)),Math.ceil(d/2.5))); for(let i=1;i<n;i++) set.add(Math.round(i/n*1e5)/1e5); }
   const ts=[...set].filter(t=>t>=0&&t<=1).sort((x,y)=>x-y);
   const profAt=t=>{ let i=0; while(i<secs.length-2 && t>secs[i+1].t) i++; const A=secs[i], B=secs[i+1], f=B.t>A.t?Math.min(1,Math.max(0,(t-A.t)/(B.t-A.t))):0;
     return A.pts.map((q,j)=>[q[0]+(B.pts[j][0]-q[0])*f, q[1]+(B.pts[j][1]-q[1])*f]); };
@@ -342,7 +342,8 @@ function alignOf(q,L){
   for(let i=0;i<N;i++){ const k0=kap(i*h), k1=kap((i+1)*h), f1=F[i]+(k0+k1)/2*h, fm=(F[i]+f1)/2;
     F.push(f1); X.push(X[i]+Math.sin(fm)*h); Z.push(Z[i]+Math.cos(fm)*h); Y.push(Y[i]+(gr(i*h)+gr((i+1)*h))/2*h); turn+=Math.abs(k0+k1)/2*h; }
   const tab=(A,st)=>{ const u=Math.min(N,Math.max(0,st/h)), i=Math.min(N-1,Math.floor(u)); return A[i]+(A[i+1]-A[i])*(u-i); };
-  return { pos:st=>({x:tab(X,st),z:tab(Z,st),f:tab(F,st)}), rise:st=>st<0?gr(0)*st:st>L?Y[N]+gr(L)*(st-L):tab(Y,st), sup:st=>su(Math.min(L,Math.max(0,st))),
+  const ext=(st,i,o)=>({x:X[i]+Math.sin(F[i])*o, z:Z[i]+Math.cos(F[i])*o, f:F[i]});   // 線形の外側は接線方向にまっすぐ延ばす
+  return { pos:st=>st<0?ext(st,0,st):st>L?ext(st,N,st-L):({x:tab(X,st),z:tab(Z,st),f:tab(F,st)}), rise:st=>st<0?gr(0)*st:st>L?Y[N]+gr(L)*(st-L):tab(Y,st), sup:st=>su(Math.min(L,Math.max(0,st))),
     grade:st=>gr(Math.min(L,Math.max(0,st))), turn, bend:turn>0||!gr.flat||!su.flat, breaks:[...kap.breaks,...gr.breaks,...su.breaks] };
 }
 const NOALN={R:0,g1:0,g2:0,e1:0,e2:0};
@@ -369,7 +370,7 @@ const TPL = {
       return [newPart({name:'函体', ...lin(p), sk1:90-(p.sk||90), sk2:90-(p.sk||90), depth:p.L, pts:rect(0,0,W,H), holes:[clean([[x0+h,y0],[x1-h,y0],[x1,y0+h],[x1,y1-h],[x1-h,y1],[x0+h,y1],[x0,y1-h],[x0,y0+h]])]})]; } },
   uch:{ label:'U型水路', f:[['B0','内幅',1500],['H0','内高',1200],['tw','側壁厚',200],['tl','底版厚',250],['L','延長',10000],['R','平面曲線半径（0=直線、負で逆向き）',0,1000],['Ls','緩和曲線長（起終点とも、0=なし）',0,1000],['i','縦断勾配（%、上りが正）',0,0.1]],
     gen:p=>{ const W=p.B0+2*p.tw, H=p.H0+p.tl; return [newPart({name:'U型水路', ...lin(p), depth:p.L, pts:[[0,0],[W,0],[W,H],[W-p.tw,H],[W-p.tw,p.tl],[p.tw,p.tl],[p.tw,H],[0,H]]})]; } },
-  bridge:{ label:'桁橋（橋台・橋脚つき）', f:[['L','橋長',40000],['n','径間数',2,1],['W','全幅員',9000],['ts','床版厚',250],['ng','主桁本数',4,1],['hg','桁高（支間部）',1600],['gt','主桁の形式',0,[[0,'連続桁'],[1,'単純桁（橋脚上で分割）']]],['hg2','中間支点上の桁高（連続桁のみ、0=等断面）',0],['bg','桁幅',450],['cw','地覆幅',400],['ch','地覆高',350],['Ha','橋台高（底面〜桁座）',6000],['Hp','橋脚高（底面〜桁座）',8000],['pc','橋脚の形式',0,[[0,'張出し式（壁柱）'],[1,'張出し式（円柱）']]],['Dc','円柱橋脚の柱径',2500],['bh','支承の高さ（0=なし）',150,10],['bw','支承の平面寸法',500],['sh','沓座（台座）の高さ（0=なし）',150,10],['ab','アンカーボルト径（0=なし）',32,1],['al','アンカーボルト長',600],['fb','変位制限ブロック',1,[[0,'なし'],[1,'あり']]],['fc','落橋防止ケーブル（橋台、単純桁は橋脚上も）',1,[[0,'なし'],[1,'あり']]],['ej','伸縮装置',1,[[0,'なし'],[1,'あり']]],['ejw','桁端の遊間（伸縮装置ありのとき）',50,10],['dj','橋脚上の床版（単純桁のとき）',0,[[0,'連続（連結床版）'],[1,'目地で分割']]],['R','平面曲線半径（0=直線、負で逆向き）',0,1000],['Ls','緩和曲線長（起終点とも、0=なし）',0,1000],['i1','縦断勾配 起点（%、上りが正）',0,0.1],['i2','縦断勾配 終点（%）',0,0.1],['e','片勾配（%、曲線の内側が下がる）',0,0.5],['sk','斜角（°、90=直角）',90,1]],
+  bridge:{ label:'桁橋（橋台・橋脚つき）', f:[['L','橋長',40000],['n','径間数',2,1],['W','全幅員',9000],['ts','床版厚',250],['ng','主桁本数',4,1],['hg','桁高（支間部）',1600],['gt','主桁の形式',0,[[0,'連続桁'],[1,'単純桁（橋脚上で分割）']]],['hg2','中間支点上の桁高（連続桁のみ、0=等断面）',0],['bg','桁幅',450],['cw','地覆幅',400],['ch','地覆高',350],['Ha','橋台高（底面〜桁座）',6000],['Hp','橋脚高（底面〜桁座）',8000],['pc','橋脚の形式',0,[[0,'張出し式（壁柱）'],[1,'張出し式（円柱）']]],['Dc','円柱橋脚の柱径',2500],['bh','支承の高さ（0=なし）',150,10],['bw','支承の平面寸法',500],['sh','沓座（台座）の高さ（0=なし）',150,10],['ab','アンカーボルト径（0=なし）',32,1],['al','アンカーボルト長',600],['fb','変位制限ブロック',1,[[0,'なし'],[1,'あり']]],['fc','落橋防止ケーブル（橋台、単純桁は橋脚上も）',1,[[0,'なし'],[1,'あり']]],['ej','伸縮装置',1,[[0,'なし'],[1,'鋼製フィンガージョイント'],[2,'ゴムジョイント'],[3,'概略の帯のみ']]],['pw','後打ちコンクリートの幅（片側、0=なし）',300,10],['pd','後打ちコンクリートの厚さ',150,10],['ejw','桁端の遊間（伸縮装置ありのとき）',50,10],['dj','橋脚上の床版（単純桁のとき）',0,[[0,'連続（連結床版）'],[1,'目地で分割']]],['R','平面曲線半径（0=直線、負で逆向き）',0,1000],['Ls','緩和曲線長（起終点とも、0=なし）',0,1000],['i1','縦断勾配 起点（%、上りが正）',0,0.1],['i2','縦断勾配 終点（%）',0,0.1],['e','片勾配（%、曲線の内側が下がる）',0,0.5],['sk','斜角（°、90=直角）',90,1]],
     gen:p=>{
       const out=[], n=Math.max(1,Math.round(p.n)), ng=Math.max(1,Math.round(p.ng)), W=p.W, L=p.L, hg=p.hg, simple=Math.round(p.gt)===1&&n>1, hg2=n>1&&!simple&&p.hg2>hg?p.hg2:hg, jg=100, rd=400; // jg: 橋脚上の桁の遊間、rd: 橋脚中心から支承列までの距離
       const bh=Math.max(0,p.bh||0), shh=Math.max(0,p.sh||0), gap=bh+shh;   // 下部工天端と桁下面のあいだ（沓座＋支承）
@@ -384,14 +385,14 @@ const TPL = {
       if(p.vt) sup.vt=vt; else Object.assign(sup,{g1:p.i1||0, g2:p.i2||0});
       if(se.every(x=>x[1]===se[0][1]&&x[2]===se[0][1])) Object.assign(sup,{e1:se[0][1], e2:se[0][1]}); else sup.se=se;   // 上部工は線形に沿わせ、両端を支承線に合わせて切る
       // 伸縮装置と目地: 桁端に遊間を空け、単純桁では橋脚上で床版も切れる。途中から始まる部材は線形を区間リストで持つ
-      const ej=Math.round(p.ej)===1, e0=ej?Math.max(0,Math.min(500,p.ejw||0)):0, dj=simple&&Math.round(p.dj)===1, lst={hz:hz.length?hz:null, vt, se, sk1:skd, sk2:skd};
+      const ejt=Math.round(p.ej)||0, ej=ejt>0, xc=W/2-p.cw, pw=ej?Math.max(0,Math.min(1000,p.pw||0)):0, pd=Math.max(20,Math.min(p.ts-50,p.pd||150));
+      const e0=ej?Math.max(0,Math.min(500,p.ejw||0)):0, dj=simple&&Math.round(p.dj)===1, lst={hz:hz.length?hz:null, vt, se, sk1:skd, sk2:skd};
       const rng=j=>[span*j+(j?jg/2:e0), span*(j+1)-(j<n-1?jg/2:e0)];   // j 番目の径間の上部工の範囲
       const decks=dj?Array.from({length:n},(_,j)=>rng(j)):[[e0,L-e0]], on=r=>e0||dj?Object.assign({s0:r[0],depth:r[1]-r[0]},lst):sup;
       decks.forEach((r,j)=>{ const tag=dj?' 第'+(j+1)+'径間':'';
-        out.push(newPart(Object.assign({name:'床版'+tag, color:'#c9cdd2', pts:rect(-W/2,Yg,W/2,Ys)},on(r))));
+        const len=r[1]-r[0], notch=pw>0&&len>2*pw+10, sl=yt=>[[-W/2,Yg],[W/2,Yg],[W/2,Ys],[xc,Ys],[xc,yt],[-xc,yt],[-xc,Ys],[-W/2,Ys]];   // 地覆のあいだの上面を yt まで下げた断面
+        out.push(newPart(Object.assign({name:'床版'+tag, color:'#c9cdd2'},on(r),notch?{pts:sl(Ys-pd), secs:[[0,sl(Ys-pd)],[(pw-1)/len,sl(Ys-pd)],[pw/len,sl(Ys)],[1-pw/len,sl(Ys)],[1-(pw-1)/len,sl(Ys-pd)],[1,sl(Ys-pd)]]}:{pts:rect(-W/2,Yg,W/2,Ys)})));
         for(const s of [-1,1]) out.push(newPart(Object.assign({name:'地覆（'+(s<0?'左':'右')+'）'+tag, color:'#d6d9dd', pts:rect(s<0?-W/2:W/2-p.cw, Ys, s<0?-W/2+p.cw:W/2, Ys+p.ch)},on(r)))); });
-      if(ej){ const jt=[['A1',0,e0+150],['A2',L-e0-150,L]]; if(dj) for(let i=1;i<n;i++) jt.push(['P'+i,span*i-jg/2-150,span*i+jg/2+150]);   // 遊間をまたぐ帯として路面に置く
-        jt.forEach(([tag,a,b])=>out.push(newPart(Object.assign({name:'伸縮装置 '+tag, color:'#3f4a55', novol:true, pts:rect(-W/2+p.cw,Ys-80,W/2-p.cw,Ys+5), s0:a, depth:b-a},lst)))); }
       // 主桁: 下縁は中間支点に向かって放物線で増厚（断面を橋軸方向に並べて表す）
       const hAt=z=>{ let h=hg; for(let i=1;i<n;i++){ const t=1-Math.abs(z-span*i)/hl; if(t>0) h=Math.max(h,hg+(hg2-hg)*t*t); } return h; };
       const zs=[0,L]; if(hg2>hg) for(let i=1;i<n;i++) for(let k=-8;k<=8;k++) zs.push(span*i+hl*k/8);
@@ -409,10 +410,15 @@ const TPL = {
         dx:Math.cos(ps),dz:-Math.sin(ps),ex:Math.sin(ps),ez:Math.cos(ps)}; };
       // 橋台: 側面形状を支承線方向に押し出す
       const Ha=p.Ha, tpw=400, sw=900, heel=Ha*0.3, toeF=Ha*0.15, tf=Math.max(700,Ha*0.12), top=Ha+hg+p.ts+gap, ya=Yg-hg-Ha-gap;
-      const ab=dy=>[[-tpw-heel,0],[sw+toeF,0],[sw+toeF,tf],[sw,tf],[sw,Ha+dy],[0,Ha+dy],[0,top+dy],[-tpw,top+dy],[-tpw,tf],[-tpw-heel,tf]]; // dy: 桁座・胸壁天端の上げ下げ
+      const pn=Math.min(pw,tpw);   // 胸壁側の後打ち幅
+      const ab=dy=>[[-tpw-heel,0],[sw+toeF,0],[sw+toeF,tf],[sw,tf],[sw,Ha+dy],[0,Ha+dy]].concat(
+        !pn?[[0,top+dy]]:pn<tpw?[[0,top+dy-pd],[-pn,top+dy-pd],[-pn,top+dy]]:[[0,top+dy-pd]], [[-tpw,top+dy-(pn>=tpw?pd:0)],[-tpw,tf],[-tpw-heel,tf]]); // dy: 桁座・胸壁天端の上げ下げ
+      const pp=dy=>[[-pn,top+dy-pd],[0,top+dy-pd],[0,top+dy],[-pn,top+dy]];   // 胸壁側の後打ちコンクリート
       const a1=line(0), a2=line(L);
       out.push(newPart({name:'橋台 A1', depth:Wl, pts:ab(a1.m*Wl/2), pts2:a1.m?ab(-a1.m*Wl/2):null, yaw:deg(a1.ps)-90, pos:[a1.x+a1.dx*Wl/2,ya+a1.up,a1.z+a1.dz*Wl/2]}));
+      if(pn) out.push(newPart({name:'後打ちコンクリート A1 胸壁側', color:'#d9d3c4', depth:Wl, pts:pp(a1.m*Wl/2), pts2:a1.m?pp(-a1.m*Wl/2):null, yaw:deg(a1.ps)-90, pos:[a1.x+a1.dx*Wl/2,ya+a1.up,a1.z+a1.dz*Wl/2]}));
       out.push(newPart({name:'橋台 A2', depth:Wl, pts:ab(-a2.m*Wl/2), pts2:a2.m?ab(a2.m*Wl/2):null, yaw:deg(a2.ps)+90, pos:[a2.x-a2.dx*Wl/2,ya+a2.up,a2.z-a2.dz*Wl/2]}));
+      if(pn) out.push(newPart({name:'後打ちコンクリート A2 胸壁側', color:'#d9d3c4', depth:Wl, pts:pp(-a2.m*Wl/2), pts2:a2.m?pp(a2.m*Wl/2):null, yaw:deg(a2.ps)+90, pos:[a2.x-a2.dx*Wl/2,ya+a2.up,a2.z-a2.dz*Wl/2]}));
       // 橋脚: 張出し式。梁は正面形状を押し出し、柱は壁柱または円柱
       const Hp=p.Hp, hb=Math.min(1800,Hp*0.3), bw=Math.max(100,p.bw||500), bp=bw+300, Wb=Math.max(W*0.85,gap>0||p.fb?2*(Math.abs(gx[0])+bp/2+150):0)/Math.cos(sk),   // 沓座が載る幅を確保
          pf=Math.min(1500,Hp*0.2), fz=4500, cyl=Math.round(p.pc)===1&&p.Dc>0;
@@ -452,6 +458,18 @@ const TPL = {
             cab.push([q.x+tx*a,y,q.z+tz*a]); pl.push([q.x+tx*(a-40),y,q.z+tz*(a-40)],[q.x+tx*b,y,q.z+tz*b]); });
           grp(name,{dia:70,depth:b-a,yaw:deg(f0),color:'#22282e',novol:true},cab);
           grp(name.replace(/^\S+/,'ケーブル定着板'),{dia:240,depth:40,yaw:deg(f0),color:STEEL,novol:true},pl); }); }
+      // 伸縮装置: 遊間 [g0,g1] をまたいで置く。sa・sb は遊間の起点側・終点側が床版（true）か胸壁（false）か
+      if(ej){ const jt=[['A1',0,e0,false,true],['A2',L-e0,L,true,false]]; if(dj) for(let i=1;i<n;i++) jt.push(['P'+i,span*i-jg/2,span*i+jg/2,true,true]);
+        const band=(name,a,b,y0,y1,color,o)=>out.push(newPart(Object.assign({name, color, pts:rect(-xc,y0,xc,y1), s0:a, depth:b-a},lst,o)));
+        jt.forEach(([tag,g0,g1,sa,sb])=>{
+          if(pw>0){ if(sa) band('後打ちコンクリート '+tag+(sb?' 起点側':' 桁側'),g0-pw,g0,Ys-pd,Ys,'#d9d3c4'); if(sb) band('後打ちコンクリート '+tag+(sa?' 終点側':' 桁側'),g1,g1+pw,Ys-pd,Ys,'#d9d3c4'); }
+          if(ejt===1){ // 鋼製フィンガー: 両側のフェースプレートから、くしの歯が互い違いに遊間へ張り出す
+            const pl=Math.max(150,Math.min(250,pw||250)), fw=50, pt=75, c=line((g0+g1)/2), ds=2*pt/Math.cos(sk), fl=Math.max(5,g1-g0-10);
+            band('伸縮装置 '+tag+' フェースプレート 起点側',g0-pl,g0,Ys-35,Ys+5,STEEL,{novol:true}); band('伸縮装置 '+tag+' フェースプレート 終点側',g1,g1+pl,Ys-35,Ys+5,STEEL,{novol:true});
+            [[' 起点側',-xc,g0],[' 終点側',-xc+pt,g1-fl]].forEach(([nm,x0,a])=>{ const cnt=Math.max(1,Math.floor((2*xc-fw-(x0+xc))/(2*pt))+1);
+              out.push(newPart(Object.assign({name:'伸縮装置 '+tag+' フィンガー'+nm, color:'#22282e', novol:true, pts:rect(x0,Ys-35,x0+fw,Ys+5), s0:a, depth:fl, inst:Array.from({length:cnt},(_,k)=>[k*ds*c.dx,k*ds*c.m,k*ds*c.dz])},lst))); }); }
+          else if(ejt===2) band('伸縮装置 '+tag+' ゴム本体',g0-120,g1+120,Ys-60,Ys+5,'#1c1f22',{novol:true});   // ゴムジョイント: 遊間と両側 120mm を覆う
+          else band('伸縮装置 '+tag,g0-75,g1+75,Ys-80,Ys+5,STEEL,{novol:true}); }); }
       return out; } }
 };
 const lin = p => ({R:p.R||0, ls1:p.Ls||0, ls2:p.Ls||0, g1:p.i||0, g2:p.i||0, hz:p.hz||null, vt:p.vt||null, se:p.se||null}); // 寸法入力の線形を部材へ渡す
@@ -723,7 +741,7 @@ function aiApply(r){
   const type=String(r.type||'none');
   if(TPL[type]){
     const t=TPL[type], params=tplDefaults(type), got=r.params||{};
-    t.f.forEach(([k,label,def])=>{ const v=['R','i','i1','i2','e'].includes(k)?(typeof got[k]==='number'&&isFinite(got[k])?got[k]:null):posNum(got[k]); const opt=['ej','ejw','dj','gt','H2','hg2','pc','Dc','R','sk','Ls','i','i1','i2','e','bh','bw','sh','ab','al','fb','fc'].includes(k); if(v!==null&&(v>0||opt||k==='toe'||k==='hn'||k==='n1'||k==='n2')){ params[k]=v; rows.push([label,v,basis[k]||basis[label]||'',false]); } else rows.push([label,def,opt?'記載なし。標準の扱い':'読み取れず。仮の値',!opt]); });
+    t.f.forEach(([k,label,def])=>{ const v=['R','i','i1','i2','e'].includes(k)?(typeof got[k]==='number'&&isFinite(got[k])?got[k]:null):posNum(got[k]); const opt=['pw','pd','ej','ejw','dj','gt','H2','hg2','pc','Dc','R','sk','Ls','i','i1','i2','e','bh','bw','sh','ab','al','fb','fc'].includes(k); if(v!==null&&(v>0||opt||k==='toe'||k==='hn'||k==='n1'||k==='n2')){ params[k]=v; rows.push([label,v,basis[k]||basis[label]||'',false]); } else rows.push([label,def,opt?'記載なし。標準の扱い':'読み取れず。仮の値',!opt]); });
     const ga=r.aln&&typeof r.aln==='object'?r.aln:{}; S.tpl={type,params,aln:{hz:fmtSegs(cleanSegs(ga.hz)),vt:fmtSegs(cleanSegs(ga.vt)),se:fmtSegs(cleanSegs(ga.se))}};
     ['hz','vt','se'].forEach((k,i)=>{ if(S.tpl.aln[k]) rows.push([['平面線形','縦断','片勾配'][i]+'の区間', S.tpl.aln[k].split('\n').length+' 区間', '「線形を区間ごとに指定する」に入力', false]); });
     S.parts=S.parts.filter(p=>!p.ai); $('tplType').value=type; buildTplForm();
@@ -787,7 +805,7 @@ function renderParts(){
   S.parts.forEach(p=>{
     const li=document.createElement('li'); li.setAttribute('aria-current',p.id===S.sel);
     const sw=document.createElement('span'); sw.className='sw'; sw.style.background=p.color;
-    const nm=document.createElement('span'); nm.className='nm'; nm.textContent=p.name+(p.inst&&p.inst.length>1?' ×'+p.inst.length:'');
+    const nm=document.createElement('span'); nm.className='nm'; nm.textContent=p.name+(p.inst&&p.inst.length>1?' ×'+p.inst.length:''); nm.title=nm.textContent;
     const vol=document.createElement('span'); vol.className='vol'; vol.textContent=p.novol?'数量外':volume(p).toFixed(2)+' m³';
     const eye=document.createElement('button'); eye.textContent=p.hidden?'表示':'隠す'; eye.onclick=e=>{ e.stopPropagation(); p.hidden=!p.hidden; changed(false); };
     const del=document.createElement('button'); del.textContent='削除'; del.onclick=e=>{ e.stopPropagation(); S.parts=S.parts.filter(q=>q!==p); if(S.sel===p.id) S.sel=null; changed(false); };
@@ -808,7 +826,7 @@ const num=v=>{ const n=parseFloat(v); return isFinite(n)?n:0; };
 bindEdit('eName',(p,v)=>p.name=v); bindEdit('eColor',(p,v)=>p.color=v);
 bindEdit('eDepth',(p,v)=>{ if(num(v)>0) p.depth=num(v); }); bindEdit('eYaw',(p,v)=>p.yaw=num(v));
 bindEdit('eX',(p,v)=>p.pos[0]=num(v)); bindEdit('eY',(p,v)=>p.pos[1]=num(v)); bindEdit('eZ',(p,v)=>p.pos[2]=num(v));
-bindEdit('eUp',(p,v)=>p.up=v==='1'); SEGF.forEach(([id,k])=>bindEdit(id,(p,v)=>p[k]=parseSegs(v))); LINF.forEach(([id,k])=>bindEdit(id,(p,v)=>{ p[k]=k[0]==='l'||k==='s0'?Math.max(0,num(v)):num(v); const c={l:'hz',g:'vt',e:'se'}[k[0]]; if(c) p[c]=null; })); // 欄を直したら同じ項目の区間指定は外す
+bindEdit('eUp',(p,v)=>p.up=v==='1'); SEGF.forEach(([id,k])=>bindEdit(id,(p,v)=>p[k]=parseSegs(v))); LINF.forEach(([id,k])=>bindEdit(id,(p,v)=>{ p[k]=k[0]==='l'?Math.max(0,num(v)):num(v); const c={l:'hz',g:'vt',e:'se'}[k[0]]; if(c) p[c]=null; })); // 欄を直したら同じ項目の区間指定は外す
 bindEdit('eR',(p,v)=>{ p.R=num(v); p.hz=null; }); bindEdit('eSk1',(p,v)=>{ if(num(v)>0) p.sk1=90-num(v); }); bindEdit('eSk2',(p,v)=>{ if(num(v)>0) p.sk2=90-num(v); }); bindEdit('eDia',(p,v)=>{ if(num(v)>0) p.dia=num(v); }); bindEdit('eDia2',(p,v)=>p.dia2=Math.max(0,num(v)));
 const parsePts=t=>t.split(/\n/).map(l=>l.split(/[,\s\t]+/).filter(Boolean).map(Number)).filter(a=>a.length>=2&&isFinite(a[0])&&isFinite(a[1])).map(a=>[a[0],a[1]]);
 $('eApply').onclick=()=>{
@@ -818,6 +836,9 @@ $('eApply').onclick=()=>{
   if(raw2.length && (raw2.length!==pts.length||area(raw2)===0)) return toast('終端側の輪郭は始端と同じ '+pts.length+' 点で入力してください');
   p.pts=pts; p.pts2=raw2.length?raw2:null; p.secs=null; p.tpl=false; changed(false); toast(raw2.length?'変断面の輪郭を更新しました':'輪郭を更新しました');
 };
+$('eFocus').onclick=()=>{ // 選択中の部材が画面いっぱいになる位置までカメラを寄せる
+  const bx=new THREE.Box3(); group.children.forEach(m=>{ if(m.userData.id===S.sel) bx.expandByObject(m); }); if(bx.isEmpty()) return toast('この部材は非表示です');
+  bx.getCenter(orb.tg); orb.dist=Math.max(0.4,bx.getSize(new THREE.Vector3()).length()*1.3/Math.min(1,cam.aspect)); setMode('3d'); updCam(); };
 $('eCopy2').onclick=()=>{ $('ePts2').value=$('ePts').value; toast('終端側の数値を書き換えて「座標を反映」を押してください'); };
 $('addCyl').onclick=()=>{ const c=newPart({name:'円柱',up:true,dia:1500,depth:6000}); S.parts.push(c); S.sel=c.id; changed(true); };
 $('eDup').onclick=()=>{ const p=S.parts.find(q=>q.id===S.sel); if(!p) return; const c=newPart(JSON.parse(JSON.stringify(p))); c.id=uid++; c.tpl=false; c.name=p.name+' のコピー'; c.pos[2]+=p.depth; S.parts.push(c); S.sel=c.id; changed(true); };
@@ -828,7 +849,7 @@ function importData(o){
   if(!o||!Array.isArray(o.parts)) throw new Error('format');
   S.name=String(o.name||''); S.sel=null;
   const P2=a=>Array.isArray(a)?a.map(q=>[+q[0]||0,+q[1]||0]):null;
-  S.parts=o.parts.filter(p=>Array.isArray(p.pts)&&(p.pts.length>=3||+p.dia>0)).map(p=>newPart({s0:Math.max(0,+p.s0||0),novol:!!p.novol,inst:Array.isArray(p.inst)&&p.inst.length?p.inst.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,hz:cleanSegs(p.hz),vt:cleanSegs(p.vt),se:cleanSegs(p.se),R:+p.R||0,ls1:Math.max(0,+p.ls1||0),ls2:Math.max(0,+p.ls2||0),g1:+p.g1||0,g2:+p.g2||0,e1:+p.e1||0,e2:+p.e2||0,sk1:+p.sk1||0,sk2:+p.sk2||0,secs:Array.isArray(p.secs)&&p.secs.every(x=>Array.isArray(x)&&isFinite(+x[0])&&Array.isArray(x[1])&&x[1].length===p.pts.length)?p.secs.map(x=>[+x[0],P2(x[1])]):null,up:!!p.up,dia:+p.dia>0?+p.dia:0,dia2:+p.dia2>0?+p.dia2:0,pts2:P2(p.pts2)&&p.pts2.length===p.pts.length?P2(p.pts2):null,name:String(p.name||'部材'),color:/^#[0-9a-f]{6}$/i.test(p.color)?p.color:CONCRETE,pts:P2(p.pts),holes:(p.holes||[]).map(h=>clean(h.map(q=>[+q[0]||0,+q[1]||0]))).filter(h=>h.length>=3),depth:+p.depth>0?+p.depth:1000,pos:[0,1,2].map(i=>+(p.pos||[])[i]||0),yaw:+p.yaw||0,tpl:!!p.tpl,hidden:!!p.hidden,torg:p.torg,ai:!!p.ai}));
+  S.parts=o.parts.filter(p=>Array.isArray(p.pts)&&(p.pts.length>=3||+p.dia>0)).map(p=>newPart({s0:+p.s0||0,novol:!!p.novol,inst:Array.isArray(p.inst)&&p.inst.length?p.inst.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,hz:cleanSegs(p.hz),vt:cleanSegs(p.vt),se:cleanSegs(p.se),R:+p.R||0,ls1:Math.max(0,+p.ls1||0),ls2:Math.max(0,+p.ls2||0),g1:+p.g1||0,g2:+p.g2||0,e1:+p.e1||0,e2:+p.e2||0,sk1:+p.sk1||0,sk2:+p.sk2||0,secs:Array.isArray(p.secs)&&p.secs.every(x=>Array.isArray(x)&&isFinite(+x[0])&&Array.isArray(x[1])&&x[1].length===p.pts.length)?p.secs.map(x=>[+x[0],P2(x[1])]):null,up:!!p.up,dia:+p.dia>0?+p.dia:0,dia2:+p.dia2>0?+p.dia2:0,pts2:P2(p.pts2)&&p.pts2.length===p.pts.length?P2(p.pts2):null,name:String(p.name||'部材'),color:/^#[0-9a-f]{6}$/i.test(p.color)?p.color:CONCRETE,pts:P2(p.pts),holes:(p.holes||[]).map(h=>clean(h.map(q=>[+q[0]||0,+q[1]||0]))).filter(h=>h.length>=3),depth:+p.depth>0?+p.depth:1000,pos:[0,1,2].map(i=>+(p.pos||[])[i]||0),yaw:+p.yaw||0,tpl:!!p.tpl,hidden:!!p.hidden,torg:p.torg,ai:!!p.ai}));
   if(o.tpl&&TPL[o.tpl.type]){ const a=o.tpl.aln||{}; S.tpl={type:o.tpl.type,params:Object.assign(tplDefaults(o.tpl.type),o.tpl.params),aln:{hz:String(a.hz||''),vt:String(a.vt||''),se:String(a.se||'')}}; }
   $('pname').value=S.name; $('tplType').value=S.tpl.type; buildTplForm();
 }

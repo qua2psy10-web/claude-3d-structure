@@ -125,7 +125,7 @@ button.b:disabled{opacity:.45;cursor:default}
       <div class="row">
         <button class="b" id="tplClear">寸法入力の部材を消す</button>
       </div>
-      <p class="note">ここで作った部材は「部材」タブで個別に色・位置・輪郭座標を直せます。図面トレースで追加した部材はそのまま残ります。</p>
+      <p class="note">ここで作った部材は「部材」タブで個別に直せます。直した部材は、寸法を変えても作り直されずに残ります（元に戻すには、その部材を削除してから寸法を入れ直します）。図面トレースで追加した部材もそのまま残ります。</p>
     </div>
 
     <div class="tab" id="tab-trace" hidden>
@@ -205,6 +205,9 @@ button.b:disabled{opacity:.45;cursor:default}
         <label class="f" id="ePathL">管の経路（1行に「横X, 高さY, 延長方向Z」mm。上の位置からの相対座標。2点以上）
           <textarea id="ePath" spellcheck="false"></textarea>
         </label>
+        <label class="f" id="eSupL">支持金具の位置（管の全長に対する % を、上流側から1行に1つ。空欄で支持金具なし）
+          <textarea id="eSup" spellcheck="false" style="min-height:76px"></textarea>
+        </label>
         <label class="f" id="eBendL" style="width:180px">曲げ半径 (mm、0=折れ線のまま)<input type="number" id="eBend" min="0" step="50"></label>
         <details id="eAlnBox">
           <summary>線形を区間ごとに指定する（S字・複数の曲線・勾配変化点）</summary>
@@ -274,7 +277,7 @@ const CONCRETE = '#b7bcc2';
 /* ---------- 状態 ---------- */
 const S = { name:'逆T型擁壁（例）', parts:[], tpl:{type:'retT', params:{}}, sel:null };
 let uid = 1;
-const newPart = o => Object.assign({id:uid++, name:'部材', color:CONCRETE, pts:[], pts2:null, secs:null, dia:0, dia2:0, up:false, novol:false, inst:null, path:null, bend:0, s0:0, R:0, ls1:0, ls2:0, g1:0, g2:0, e1:0, e2:0, hz:null, vt:null, se:null, sk1:0, sk2:0, holes:[], depth:1000, pos:[0,0,0], yaw:0, tpl:false, hidden:false}, o);
+const newPart = o => Object.assign({id:uid++, name:'部材', color:CONCRETE, pts:[], pts2:null, secs:null, dia:0, dia2:0, up:false, novol:false, inst:null, path:null, bend:0, sup:null, s0:0, R:0, ls1:0, ls2:0, g1:0, g2:0, e1:0, e2:0, hz:null, vt:null, se:null, sk1:0, sk2:0, holes:[], depth:1000, pos:[0,0,0], yaw:0, tpl:false, hidden:false}, o);
 
 function area(p){ let a=0; for(let i=0;i<p.length;i++){ const [x1,y1]=p[i],[x2,y2]=p[(i+1)%p.length]; a+=x1*y2-x2*y1; } return Math.abs(a)/2; }
 function circle(d){ const a=[]; for(let i=0;i<48;i++){ const t=i/48*2*Math.PI; a.push([d/2*Math.cos(t),d/2*Math.sin(t)]); } return a; }
@@ -285,15 +288,17 @@ const skewOf = (p,k) => p.up?0:Math.tan(Math.max(-70,Math.min(70,+p[k]||0))*Math
 // 部材の形: 線形（直線または円弧）に沿って断面を並べ、隣り合う断面を面でつなぐ。
 // 断面は始端〜終端で変えられ（pts2 / secs）、端面は斜角のぶん傾く。
 // 管: 折れ線の経路 path（mm）に沿って円形断面を通す。折れ点は曲げ半径 bend の円弧でつなぐ
-function tubeGeom(p){
-  const V=q=>new THREE.Vector3(q[0]/1000,q[1]/1000,q[2]/1000), P0=p.path.map(V), rb=Math.max(0,+p.bend||p.dia*2)/1000, r=p.dia/2000, C=[P0[0]];
+function tubeLine(p){ // 曲がりを入れた中心線（m）
+  const V=q=>new THREE.Vector3(q[0]/1000,q[1]/1000,q[2]/1000), P0=p.path.map(V), rb=Math.max(0,+p.bend||0)/1000, C=[P0[0]];
   for(let i=1;i<P0.length-1;i++){ const d1=P0[i].clone().sub(P0[i-1]), d2=P0[i+1].clone().sub(P0[i]), l1=d1.length(), l2=d2.length(); d1.normalize(); d2.normalize();
     const ph=Math.acos(Math.max(-1,Math.min(1,d1.dot(d2)))); if(ph<0.02||ph>3.1||!rb){ C.push(P0[i]); continue; }
     const tl=Math.min(rb*Math.tan(ph/2),l1*0.45,l2*0.45), re=tl/Math.tan(ph/2), u=d2.clone().addScaledVector(d1,-d1.dot(d2)).normalize();   // tl: 折れ点から曲がり始めまでの長さ
     const O=P0[i].clone().addScaledVector(d1,-tl).addScaledVector(u,re), m=Math.max(2,Math.ceil(ph/(Math.PI/18)));
     for(let k=0;k<=m;k++){ const a=ph*k/m; C.push(O.clone().addScaledVector(u,-re*Math.cos(a)).addScaledVector(d1,re*Math.sin(a))); } }
-  C.push(P0[P0.length-1]);
-  const N=24, rings=[], pos=[], Pp=q=>pos.push(q.x,q.y,q.z); let n=null;
+  C.push(P0[P0.length-1]); return C;
+}
+function tubePos(C,r,pos){ // 中心線 C に沿う半径 r の管の三角形を pos に足す
+  const N=24, rings=[], Pp=q=>pos.push(q.x,q.y,q.z); let n=null;
   C.forEach((c,i)=>{ const t=C[Math.min(C.length-1,i+1)].clone().sub(C[Math.max(0,i-1)]).normalize();
     if(!n){ n=new THREE.Vector3(1,0,0); if(Math.abs(t.x)>0.9) n.set(0,0,1); }
     n.addScaledVector(t,-n.dot(t)).normalize(); const b=t.clone().cross(n);   // 断面の向きを前の断面からねじれないように引き継ぐ
@@ -301,7 +306,22 @@ function tubeGeom(p){
   const a0=rings[0], a1=rings[rings.length-1];
   for(let k=1;k<N-1;k++){ Pp(a0[0]);Pp(a0[k+1]);Pp(a0[k]); Pp(a1[0]);Pp(a1[k]);Pp(a1[k+1]); }
   for(let s=0;s<rings.length-1;s++){ const a=rings[s], c=rings[s+1]; for(let i=0;i<N;i++){ const j=(i+1)%N; Pp(a[i]);Pp(a[j]);Pp(c[j]); Pp(a[i]);Pp(c[j]);Pp(c[i]); } }
-  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.computeVertexNormals(); return g;
+}
+const posGeom = pos => { const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3)); g.computeVertexNormals(); return g; };
+function tubeGeom(p){ const pos=[]; tubePos(tubeLine(p),p.dia/2000,pos); return posGeom(pos); }
+const tubeLen = p => { const C=tubeLine(p); let l=0; for(let i=1;i<C.length;i++) l+=C[i].distanceTo(C[i-1]); return l*1000; }; // 管の全長 mm
+// 管の支持金具: 管の全長に対する割合 t の位置に、管を巻くバンドを置く。arm があれば、水平な向き (dx,dz) に
+// 構造物の面（その向きの座標が face mm の鉛直面）まで腕を伸ばす。管の経路や位置を変えると、ここで求め直される。
+function supGeom(p){
+  const C=tubeLine(p), cum=[0]; for(let i=1;i<C.length;i++) cum.push(cum[i-1]+C[i].distanceTo(C[i-1]));
+  const tot=cum[cum.length-1], pos=[], r=p.dia/2000; if(!(tot>0)) return null;
+  const M=new THREE.Matrix4().compose(new THREE.Vector3(p.pos[0]/1000,p.pos[1]/1000,p.pos[2]/1000),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),p.yaw*Math.PI/180),new THREE.Vector3(1,1,1)), Mi=M.clone().invert();
+  for(const sp of p.sup||[]){ const d=Math.max(0,Math.min(1,+sp.t||0))*tot; let i=1; while(i<C.length-1&&cum[i]<d) i++;
+    const T=C[i].clone().sub(C[i-1]).normalize(), Q=C[i-1].clone().addScaledVector(T,d-cum[i-1]);
+    tubePos([Q.clone().addScaledVector(T,-0.02),Q.clone().addScaledVector(T,0.02)],r+0.02,pos);
+    if(sp.arm){ const w=Q.clone().applyMatrix4(M), len=sp.arm.face/1000-(w.x*sp.arm.dx+w.z*sp.arm.dz);   // 管から面までの水平距離
+      if(len>r+0.03) tubePos([Q,w.clone().add(new THREE.Vector3(sp.arm.dx*len,0,sp.arm.dz*len)).applyMatrix4(Mi)],0.02,pos); } }
+  return pos.length?posGeom(pos):null;
 }
 function partGeom(p){
   if(p.dia>0&&Array.isArray(p.path)&&p.path.length>1) return tubeGeom(p);
@@ -517,20 +537,20 @@ const TPL = {
               const PIPE='#55616c', top0=yt2-200, yEnd=y+c.up+Hp-hb*0.55, colF=cyl?p.Dc/2:Wc/2, Dh=Math.abs(xp)/Math.cos(sk)-colF-135, y1=yEnd-250;   // Dh: 内側へ振る水平距離、y1: 斜め管の始まる高さ
               if(tag[0]!=='A'&&Math.round(p.pr)===1&&Dh>300&&top0-y1>200){
                 const sl=Math.max(0.05,hb*0.45/Math.max(1,Wb/2-Wc/2)), y2=y1-sl*Dh, ex2=wx-lo*c.dx*Dh, ez2=wz-lo*c.dz*Dh, yin=deg(c.ps)-lo*90, len2=Math.max(300,y2-base);   // sl: 梁の下面のハンチと同じ勾配
-                out.push(newPart({name:'排水管 '+tag, dia:150, bend:300, path:[[wx,top0,wz],[wx,y1,wz],[ex2,y2,ez2],[ex2,y2-len2,ez2]], depth:top0-y1+Math.hypot(Dh,sl*Dh)+len2, color:PIPE, novol:true}));   // 曲がりは半径 300mm の曲線
-                if(Math.round(p.pb)===1){ const nb=Math.max(2,Math.ceil((len2-500)/2000)+1), lv=Array.from({length:nb},(_,i)=>y2-len2+200+(len2-500)*i/(nb-1));
-                  const yb1=Math.min(top0-50,Math.max(y1+50,yEnd+hb*0.275)), arm=Math.round(Math.abs(xp)/Math.cos(sk)-Wb/2);   // 上部は梁の端で 1 か所支える
-                  grp('排水管 '+tag+' 支持バンド',{up:true,dia:190,depth:40,color:STEEL,novol:true},lv.map(v=>[ex2,v-20,ez2]).concat([[wx,yb1-20,wz]]));
-                  grp('排水管 '+tag+' 支持金具（柱）',{pts:rect(-20,-20,20,20),depth:135,yaw:yin,color:STEEL,novol:true},lv.map(v=>[ex2,v,ez2]));
-                  if(arm>0) grp('排水管 '+tag+' 支持金具（梁）',{pts:rect(-20,-20,20,20),depth:arm,yaw:yin,color:STEEL,novol:true},[[wx,yb1,wz]]); }
+                const pipe=newPart({name:'排水管 '+tag, dia:150, bend:300, path:[[wx,top0,wz],[wx,y1,wz],[ex2,y2,ez2],[ex2,y2-len2,ez2]], color:PIPE, novol:true});   // 曲がりは半径 300mm の曲線
+                if(Math.round(p.pb)===1){ const nb=Math.max(2,Math.ceil((len2-500)/2000)+1), tot=tubeLen(pipe), ix=-lo*c.dx, iz=-lo*c.dz;   // (ix,iz): 構造物へ向かう水平の向き
+                  const yb1=Math.min(top0-50,Math.max(y1+50,yEnd+hb*0.275)), arm=Math.abs(xp)/Math.cos(sk)-Wb/2;   // 上部は梁の端で 1 か所支える
+                  pipe.sup=[{t:(top0-yb1)/tot, arm:arm>0?{dx:ix,dz:iz,face:wx*ix+wz*iz+arm}:null}].concat(
+                    Array.from({length:nb},(_,i)=>({t:1-(200+(len2-500)*i/(nb-1))/tot, arm:{dx:ix,dz:iz,face:ex2*ix+ez2*iz+135}})).reverse()); }   // 柱沿いは柱の面まで 135mm
+                out.push(pipe);
               } else {
-              out.push(newPart({name:'排水管 '+tag, up:true, dia:150, depth:len, pos:[wx,yt2-200-len,wz], color:PIPE, novol:true}));
+              const pipe=newPart({name:'排水管 '+tag, dia:150, bend:300, path:[[wx,top0,wz],[wx,top0-len,wz]], color:PIPE, novol:true});
               // 支持金具: 2m 以内の間隔で、管を巻くバンドと、構造物の側面まで届く腕を置く
-              if(Math.round(p.pb)===1){ const top=yt2-200, bot=top-len, nb=Math.max(2,Math.ceil((len-500)/2000)+1), lv=Array.from({length:nb},(_,i)=>bot+200+(len-500)*i/(nb-1));
-                const isA=tag[0]==='A', yBeam=y+c.up+Hp-hb*0.55, face=v=>isA?W/2:v>=yBeam?Wb/2*Math.cos(sk):cyl?p.Dc/2:Wc/2*Math.cos(sk);   // その高さで管にいちばん近い側面の横位置
-                grp('排水管 '+tag+' 支持バンド',{up:true,dia:190,depth:40,color:STEEL,novol:true},lv.map(v=>[wx,v-20,wz]));
-                const by={}; lv.forEach(v=>{ const k=Math.round((Math.abs(xp)-face(v))/Math.cos(sk)); (by[k]=by[k]||[]).push(v); });
-                Object.keys(by).forEach(k=>{ if(+k>0) grp('排水管 '+tag+' 支持金具'+(isA?'':by[k][0]>=yBeam?'（梁）':'（柱）'),{pts:rect(-20,-20,20,20),depth:+k,yaw:deg(c.ps)-lo*90,color:STEEL,novol:true},by[k].map(v=>[wx,v,wz])); }); } } } }
+              if(Math.round(p.pb)===1){ const nb=Math.max(2,Math.ceil((len-500)/2000)+1), ix=-lo*c.dx, iz=-lo*c.dz;
+                const isA=tag[0]==='A', face=v=>isA?W/2:v>=yEnd?Wb/2*Math.cos(sk):cyl?p.Dc/2:Wc/2*Math.cos(sk);   // その高さで管にいちばん近い側面の横位置
+                pipe.sup=Array.from({length:nb},(_,i)=>{ const h=200+(len-500)*i/(nb-1), k=(Math.abs(xp)-face(top0-len+h))/Math.cos(sk);
+                  return {t:1-h/len, arm:k>0?{dx:ix,dz:iz,face:wx*ix+wz*iz+k}:null}; }).reverse(); }   // 上流側から順に
+              out.push(pipe); } } }
           // 地覆部の継手: 地覆の天端と内側面を覆う L 形のカバープレート。橋台では胸壁の上にも地覆を延ばす
           if(Math.round(p.cj)===1){ const yt=Ys+p.ch, t=6;
             for(const sd of [-1,1]){ const nm=sd<0?'左':'右', X=v=>sd*v, L5=[[X(xc-t),Ys+5],[X(xc),Ys+5],[X(xc),yt],[X(W/2),yt],[X(W/2),yt+t],[X(xc-t),yt+t]];
@@ -553,7 +573,8 @@ function applyTpl(){
   if(Object.values(S.tpl.params).some(v=>!isFinite(v))) return;
   const al=tplAln(), p=Object.assign({},S.tpl.params,{hz:parseSegs(al.hz),vt:parseSegs(al.vt),se:parseSegs(al.se)});
   const gen=t.gen(p).filter(q=>prof(q).length>=3 && area(prof(q))>0 && q.depth>0); gen.forEach(q=>q.tpl=true);
-  S.parts = gen.concat(S.parts.filter(q=>!q.tpl));
+  const keep=S.parts.filter(q=>!q.tpl), mine=new Set(keep.filter(q=>q.edited).map(q=>q.name));   // 部材タブで直した部材は、同じ名前の部材を作り直さずに残す
+  S.parts = gen.filter(q=>!mine.has(q.name)).concat(keep);
   if(!S.parts.some(q=>q.id===S.sel)) S.sel=null;
   changed(true);
 }
@@ -605,6 +626,8 @@ function rebuild(){
     (p.inst&&p.inst.length?p.inst:[[0,0,0]]).forEach((o,i)=>{ const c=i?new THREE.Mesh(g,m.material):m; // 同じ形を複数の位置に置く
       c.position.set((p.pos[0]+o[0])/1000,(p.pos[1]+o[1])/1000,(p.pos[2]+o[2])/1000); c.rotation.y=p.yaw*Math.PI/180; c.userData.id=p.id; c.name=p.name;
       c.add(new THREE.LineSegments(eg,em)); group.add(c); });
+    if(p.path&&p.sup&&p.sup.length){ const sg=supGeom(p); if(sg){ const sm=new THREE.Mesh(sg,new THREE.MeshStandardMaterial({color:'#3f4a55', roughness:.8, metalness:0, emissive:sel?mark:0x000000, emissiveIntensity:sel?.35:0}));
+      sm.position.copy(m.position); sm.rotation.y=m.rotation.y; sm.userData.id=p.id; sm.name=p.name+' 支持金具'; group.add(sm); } }
   }
   group.updateMatrixWorld(true); bbox.setFromObject(group);
   if(gridObj){ scene.remove(gridObj); gridObj.geometry.dispose(); gridObj.material.dispose(); }
@@ -889,12 +912,12 @@ function renderParts(){
     $('eName').value=p.name; $('eColor').value=p.color; $('eDepth').value=p.depth; $('eYaw').value=p.yaw;
     $('eX').value=p.pos[0]; $('eY').value=p.pos[1]; $('eZ').value=p.pos[2];
     $('ePts').value=p.pts.map(q=>q[0]+', '+q[1]).join('\n'); $('ePts2').value=(p.pts2||[]).map(q=>q[0]+', '+q[1]).join('\n');
-    $('eUp').value=p.up?1:0; $('eDia').value=p.dia||''; $('eDia2').value=p.dia2||0; $('eR').value=p.R||0; $('eSk1').value=90-(p.sk1||0); $('eSk2').value=90-(p.sk2||0); $('ePath').value=(p.path||[]).map(q=>q.map(v=>Math.round(v*10)/10).join(', ')).join('\n'); $('eBend').value=p.bend||0; LINF.forEach(([id,k])=>$(id).value=p[k]||0); SEGF.forEach(([id,k])=>$(id).value=fmtSegs(p[k])); $('eAlnBox').open=!!(p.hz||p.vt||p.se);
+    $('eUp').value=p.up?1:0; $('eDia').value=p.dia||''; $('eDia2').value=p.dia2||0; $('eR').value=p.R||0; $('eSk1').value=90-(p.sk1||0); $('eSk2').value=90-(p.sk2||0); $('ePath').value=(p.path||[]).map(q=>q.map(v=>Math.round(v*10)/10).join(', ')).join('\n'); $('eBend').value=p.bend||0; $('eSup').value=(p.sup||[]).map(x=>Math.round(x.t*1000)/10).join('\n'); LINF.forEach(([id,k])=>$(id).value=p[k]||0); SEGF.forEach(([id,k])=>$(id).value=fmtSegs(p[k])); $('eAlnBox').open=!!(p.hz||p.vt||p.se);
   }
-  if(p){ const c=p.dia>0; ['eRL','eSk1L','eSk2L'].concat(LINF.map(x=>x[0]+'L'),['eAlnBox']).forEach(i=>$(i).hidden=!!(p.up||p.path)); ['eDiaL','eDia2L'].forEach(i=>$(i).hidden=!c); ['ePathL','eBendL'].forEach(i=>$(i).hidden=!p.path); if(p.path){ $('eDia2L').hidden=true; $('eDiaL').firstChild.textContent='直径 (mm)'; } else $('eDiaL').firstChild.textContent='直径・始端 (mm)'; ['ePtsL','ePts2L','eApply','eCopy2'].forEach(i=>$(i).hidden=c);
+  if(p){ const c=p.dia>0; ['eRL','eSk1L','eSk2L'].concat(LINF.map(x=>x[0]+'L'),['eAlnBox']).forEach(i=>$(i).hidden=!!(p.up||p.path)); ['eDiaL','eDia2L'].forEach(i=>$(i).hidden=!c); ['ePathL','eBendL','eSupL'].forEach(i=>$(i).hidden=!p.path); if(p.path){ $('eDia2L').hidden=true; $('eDiaL').firstChild.textContent='直径 (mm)'; } else $('eDiaL').firstChild.textContent='直径・始端 (mm)'; ['ePtsL','ePts2L','eApply','eCopy2'].forEach(i=>$(i).hidden=c);
   }
 }
-function bindEdit(id,fn){ $(id).addEventListener('input',()=>{ const p=S.parts.find(q=>q.id===S.sel); if(!p) return; fn(p,$(id).value); p.tpl=false; changed(false); }); }
+function bindEdit(id,fn){ $(id).addEventListener('input',()=>{ const p=S.parts.find(q=>q.id===S.sel); if(!p) return; fn(p,$(id).value); p.tpl=false; p.edited=true; changed(false); }); }
 const num=v=>{ const n=parseFloat(v); return isFinite(n)?n:0; };
 bindEdit('eName',(p,v)=>p.name=v); bindEdit('eColor',(p,v)=>p.color=v);
 bindEdit('eDepth',(p,v)=>{ if(num(v)>0) p.depth=num(v); }); bindEdit('eYaw',(p,v)=>p.yaw=num(v));
@@ -907,13 +930,15 @@ $('eApply').onclick=()=>{
   const raw=parsePts($('ePts').value), raw2=parsePts($('ePts2').value), pts=raw2.length?raw:clean(raw);
   if(pts.length<3||area(pts)===0) return toast('座標は3点以上、1行に「横, 高さ」で入力してください');
   if(raw2.length && (raw2.length!==pts.length||area(raw2)===0)) return toast('終端側の輪郭は始端と同じ '+pts.length+' 点で入力してください');
-  p.pts=pts; p.pts2=raw2.length?raw2:null; p.secs=null; p.tpl=false; changed(false); toast(raw2.length?'変断面の輪郭を更新しました':'輪郭を更新しました');
+  p.pts=pts; p.pts2=raw2.length?raw2:null; p.secs=null; p.tpl=false; p.edited=true; changed(false); toast(raw2.length?'変断面の輪郭を更新しました':'輪郭を更新しました');
 };
-$('eFocus').onclick=()=>{ // 選択中の部材が画面いっぱいになる位置までカメラを寄せる
+$('eFocus').onclick=()=>{ // 支持金具も含めて寄る
+  // 選択中の部材が画面いっぱいになる位置までカメラを寄せる
   const bx=new THREE.Box3(); group.children.forEach(m=>{ if(m.userData.id===S.sel) bx.expandByObject(m); }); if(bx.isEmpty()) return toast('この部材は非表示です');
   bx.getCenter(orb.tg); orb.dist=Math.max(0.4,bx.getSize(new THREE.Vector3()).length()*1.3/Math.min(1,cam.aspect)); setMode('3d'); updCam(); };
 $('eCopy2').onclick=()=>{ $('ePts2').value=$('ePts').value; toast('終端側の数値を書き換えて「座標を反映」を押してください'); };
 bindEdit('ePath',(p,v)=>{ const a=v.split(/\n/).map(l=>l.split(/[,\s\t]+/).filter(Boolean).map(Number)).filter(x=>x.length>=3&&x.slice(0,3).every(isFinite)).map(x=>x.slice(0,3)); if(a.length>=2) p.path=a; }); // 2点そろうまでは前の経路のまま
+bindEdit('eSup',(p,v)=>{ const old=p.sup||[]; p.sup=v.split(/[\n,\s]+/).filter(Boolean).map(Number).filter(isFinite).map((t,i)=>({t:Math.max(0,Math.min(100,t))/100, arm:(old[i]||{}).arm||null})); }); // 腕の向きと届く面は、同じ行の元の金具から引き継ぐ
 bindEdit('eBend',(p,v)=>p.bend=Math.max(0,num(v)));
 $('addPipe').onclick=()=>{ const c=newPart({name:'管',dia:100,bend:200,color:'#55616c',novol:true,path:[[0,3000,0],[0,1000,0],[1500,500,0],[1500,0,0]]}); S.parts.push(c); S.sel=c.id; changed(true); };
 $('addCyl').onclick=()=>{ const c=newPart({name:'円柱',up:true,dia:1500,depth:6000}); S.parts.push(c); S.sel=c.id; changed(true); };
@@ -925,7 +950,7 @@ function importData(o){
   if(!o||!Array.isArray(o.parts)) throw new Error('format');
   S.name=String(o.name||''); S.sel=null;
   const P2=a=>Array.isArray(a)?a.map(q=>[+q[0]||0,+q[1]||0]):null;
-  S.parts=o.parts.filter(p=>Array.isArray(p.pts)&&(p.pts.length>=3||+p.dia>0)).map(p=>newPart({path:Array.isArray(p.path)&&p.path.length>1?p.path.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,bend:Math.max(0,+p.bend||0),s0:+p.s0||0,novol:!!p.novol,inst:Array.isArray(p.inst)&&p.inst.length?p.inst.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,hz:cleanSegs(p.hz),vt:cleanSegs(p.vt),se:cleanSegs(p.se),R:+p.R||0,ls1:Math.max(0,+p.ls1||0),ls2:Math.max(0,+p.ls2||0),g1:+p.g1||0,g2:+p.g2||0,e1:+p.e1||0,e2:+p.e2||0,sk1:+p.sk1||0,sk2:+p.sk2||0,secs:Array.isArray(p.secs)&&p.secs.every(x=>Array.isArray(x)&&isFinite(+x[0])&&Array.isArray(x[1])&&x[1].length===p.pts.length)?p.secs.map(x=>[+x[0],P2(x[1])]):null,up:!!p.up,dia:+p.dia>0?+p.dia:0,dia2:+p.dia2>0?+p.dia2:0,pts2:P2(p.pts2)&&p.pts2.length===p.pts.length?P2(p.pts2):null,name:String(p.name||'部材'),color:/^#[0-9a-f]{6}$/i.test(p.color)?p.color:CONCRETE,pts:P2(p.pts),holes:(p.holes||[]).map(h=>clean(h.map(q=>[+q[0]||0,+q[1]||0]))).filter(h=>h.length>=3),depth:+p.depth>0?+p.depth:1000,pos:[0,1,2].map(i=>+(p.pos||[])[i]||0),yaw:+p.yaw||0,tpl:!!p.tpl,hidden:!!p.hidden,torg:p.torg,ai:!!p.ai}));
+  S.parts=o.parts.filter(p=>Array.isArray(p.pts)&&(p.pts.length>=3||+p.dia>0)).map(p=>newPart({edited:!!p.edited,sup:Array.isArray(p.sup)?p.sup.filter(x=>x&&isFinite(+x.t)).map(x=>({t:+x.t,arm:x.arm&&isFinite(+x.arm.dx)&&isFinite(+x.arm.dz)&&isFinite(+x.arm.face)?{dx:+x.arm.dx,dz:+x.arm.dz,face:+x.arm.face}:null})):null,path:Array.isArray(p.path)&&p.path.length>1?p.path.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,bend:Math.max(0,+p.bend||0),s0:+p.s0||0,novol:!!p.novol,inst:Array.isArray(p.inst)&&p.inst.length?p.inst.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,hz:cleanSegs(p.hz),vt:cleanSegs(p.vt),se:cleanSegs(p.se),R:+p.R||0,ls1:Math.max(0,+p.ls1||0),ls2:Math.max(0,+p.ls2||0),g1:+p.g1||0,g2:+p.g2||0,e1:+p.e1||0,e2:+p.e2||0,sk1:+p.sk1||0,sk2:+p.sk2||0,secs:Array.isArray(p.secs)&&p.secs.every(x=>Array.isArray(x)&&isFinite(+x[0])&&Array.isArray(x[1])&&x[1].length===p.pts.length)?p.secs.map(x=>[+x[0],P2(x[1])]):null,up:!!p.up,dia:+p.dia>0?+p.dia:0,dia2:+p.dia2>0?+p.dia2:0,pts2:P2(p.pts2)&&p.pts2.length===p.pts.length?P2(p.pts2):null,name:String(p.name||'部材'),color:/^#[0-9a-f]{6}$/i.test(p.color)?p.color:CONCRETE,pts:P2(p.pts),holes:(p.holes||[]).map(h=>clean(h.map(q=>[+q[0]||0,+q[1]||0]))).filter(h=>h.length>=3),depth:+p.depth>0?+p.depth:1000,pos:[0,1,2].map(i=>+(p.pos||[])[i]||0),yaw:+p.yaw||0,tpl:!!p.tpl,hidden:!!p.hidden,torg:p.torg,ai:!!p.ai}));
   if(o.tpl&&TPL[o.tpl.type]){ const a=o.tpl.aln||{}; S.tpl={type:o.tpl.type,params:Object.assign(tplDefaults(o.tpl.type),o.tpl.params),aln:{hz:String(a.hz||''),vt:String(a.vt||''),se:String(a.se||'')}}; }
   $('pname').value=S.name; $('tplType').value=S.tpl.type; buildTplForm();
 }

@@ -59,6 +59,14 @@ button.b:disabled{opacity:.45;cursor:default}
 .chk{display:flex;gap:6px;align-items:center;font-size:13px}
 .note{font-size:12px;color:var(--muted);border-left:3px solid var(--line);padding-left:8px}
 #msg{color:var(--mark);font-size:13px;min-height:1.5em}
+#aiMsg{font-size:13px;color:var(--ink);min-height:1.5em}
+#aiOut{display:flex;flex-direction:column;gap:8px}
+#aiTbl{border-collapse:collapse;width:100%;font-size:13px}
+#aiTbl td{border-bottom:1px solid var(--line);padding:4px 6px 4px 0;vertical-align:top}
+#aiTbl td:nth-child(2){font-family:var(--f-num);text-align:right;white-space:nowrap}
+#aiTbl td:nth-child(3){color:var(--muted);font-size:12px}
+#aiTbl tr.guess td:nth-child(2){color:var(--mark)}
+#aiNotes{margin:0;padding-left:1.2em;font-size:13px;color:var(--muted)}
 #plist{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:4px;overflow:hidden}
 #plist li{display:grid;grid-template-columns:14px 1fr auto auto auto;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line);cursor:pointer}
 #plist li:last-child{border-bottom:0}
@@ -120,7 +128,19 @@ button.b:disabled{opacity:.45;cursor:default}
         <label class="f" style="width:90px">PDFのページ<input type="number" id="dpage" value="1" min="1"></label>
         <button class="b" id="dsample">サンプル図面を使う</button>
       </div>
-      <h2>2. 縮尺を合わせる</h2>
+      <h2>2. AIで読み取る</h2>
+      <p>図面の寸法をAIが読み取り、3Dモデルを組み立てます。読み取りたい断面や側面図を画面いっぱいに拡大してから押すと精度が上がります（画面に映っている範囲だけを送ります）。</p>
+      <div class="row">
+        <button class="b pri" id="aiGo">表示中の範囲をAIで読み取る</button>
+        <button class="b" id="aiStop" hidden>中止</button>
+      </div>
+      <div id="aiMsg" role="status"></div>
+      <div id="aiOut" hidden>
+        <table id="aiTbl"></table>
+        <ul id="aiNotes"></ul>
+        <p class="note">AIの読み取りには誤りが含まれることがあります。上の値を必ず図面と照合し、違っていれば「寸法入力」または「部材」タブで直してください。</p>
+      </div>
+      <h2>手でなぞる場合 ― 縮尺を合わせる</h2>
       <p>寸法のわかっている2点（寸法線の両端など）を図面上でタップします。</p>
       <div class="row">
         <button class="b" id="tScale" aria-pressed="false">2点を指定する</button>
@@ -130,7 +150,7 @@ button.b:disabled{opacity:.45;cursor:default}
         <label class="f" style="width:140px">2点間の実寸 (mm)<input type="number" id="scaleLen" min="1"></label>
         <button class="b pri" id="scaleOk" style="align-self:flex-end">確定</button>
       </div>
-      <h2>3. 断面の輪郭をなぞる</h2>
+      <h2>手でなぞる場合 ― 断面の輪郭をなぞる</h2>
       <p>頂点を順にタップし、最初の点に戻るか「閉じて部材にする」を押します。ドラッグで図面を移動、ホイール／ピンチで拡大できます。</p>
       <div class="row">
         <button class="b" id="tTrace" aria-pressed="false">輪郭をなぞる</button>
@@ -482,6 +502,97 @@ $('dsample').onclick=()=>{
   setImage(cv,1400,1000); msg('サンプル図面です。底版幅 3500 の寸法線の両端を使って縮尺を合わせてみてください。');
 };
 
+/* ---------- AIによる図面読み取り ---------- */
+const aiMsg = t => { $('aiMsg').textContent=t||''; };
+let aiFn, aiCtl=null;
+function aiPrompt(){
+  const types=Object.keys(TPL).map(k=>'- "'+k+'" '+TPL[k].label+': '+TPL[k].f.map(f=>f[0]+'='+f[1]).join(', ')).join('\n');
+  return `あなたは土木構造物の設計図面を読む技術者です。添付画像は図面の一部（利用者が画面に表示している範囲）です。図面に書かれた寸法値を読み取り、3Dモデルを作るためのデータをJSONで返してください。
+
+寸法の単位はすべて mm に換算します（図面が m 表記なら1000倍）。勾配「1:0.5」などは比の数値で読みます。図面に書かれていない値を推測で埋めないでください。読み取れない項目は null にします。
+
+まず構造物が次の型のどれに当たるかを判断します。
+${types}
+- "custom" 上のどれにも当たらない、または形が合わない場合
+- "none" 構造物の図面として読み取れない場合
+
+型に当たる場合は params にその型の項目を入れます。逆T型・L型擁壁の「延長」、カルバートや水路の「延長」は断面図だけでは分からないことが多いので、書かれていなければ null にします。
+
+"custom" の場合は parts に部材を並べます。各部材は断面の輪郭 pts（頂点を順に [横, 高さ] の mm 座標、左下付近を原点、反時計回り）と、断面に直交する方向の長さ depth（mm、不明なら null）を持ちます。中空部があれば holes に同じ形式の輪郭を入れます。座標は画像上の位置からではなく、寸法値を足し引きして求めてください。
+
+read には読み取った寸法を、図面のどの表記を根拠にしたかとともに列挙します。型の項目に当たる寸法には key にその記号（H など）を入れます。notes には読み取れなかった項目、あいまいだった点、仮定した点を日本語の短い文で書きます。
+
+返答はJSONオブジェクトのみ。形式:
+{"type":"retT","name":"構造物の名称","params":{"H":5000,"B":3500},"parts":[{"name":"躯体","pts":[[0,0],[1000,0],[1000,500]],"holes":[],"depth":null}],"read":[{"key":"H","item":"全高","value":5000,"basis":"左側の寸法線 5000"}],"notes":["延長は図面に記載なし"]}
+params と parts は使わない側を空にしてかまいません。`;
+}
+function viewBlob(){ // いま画面に映っている範囲を画像にする
+  const w=view.clientWidth,h=view.clientHeight;
+  const x0=Math.max(0,-T.ox/T.k), y0=Math.max(0,-T.oy/T.k), x1=Math.min(T.w,(w-T.ox)/T.k), y1=Math.min(T.h,(h-T.oy)/T.k);
+  if(x1-x0<8||y1-y0<8) return Promise.resolve(null);
+  const sc=Math.min(1,1600/Math.max(x1-x0,y1-y0)), cv=document.createElement('canvas');
+  cv.width=Math.max(1,Math.round((x1-x0)*sc)); cv.height=Math.max(1,Math.round((y1-y0)*sc));
+  const g=cv.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,cv.width,cv.height); g.imageSmoothingQuality='high';
+  g.drawImage(T.img,x0,y0,x1-x0,y1-y0,0,0,cv.width,cv.height);
+  return new Promise(ok=>cv.toBlob(ok,'image/jpeg',0.92));
+}
+const posNum = v => typeof v==='number'&&isFinite(v)&&v>=0 ? v : null;
+function aiApply(r){
+  const rows=[], notes=Array.isArray(r.notes)?r.notes.map(String).slice(0,12):[];
+  const basis={}; (Array.isArray(r.read)?r.read:[]).forEach(x=>{ if(x&&(x.key||x.item)) basis[String(x.key||x.item)]=String(x.basis||''); });
+  const type=String(r.type||'none');
+  if(TPL[type]){
+    const t=TPL[type], params=tplDefaults(type), got=r.params||{};
+    t.f.forEach(([k,label,def])=>{ const v=posNum(got[k]); if(v!==null&&(v>0||k==='toe'||k==='hn'||k==='n1'||k==='n2')){ params[k]=v; rows.push([label,v,basis[k]||basis[label]||'',false]); } else rows.push([label,def,'読み取れず。仮の値',true]); });
+    S.tpl={type,params}; S.parts=S.parts.filter(p=>!p.ai); $('tplType').value=type; buildTplForm();
+    if(r.name){ S.name=String(r.name).slice(0,60); $('pname').value=S.name; }
+    applyTpl(); return {title:t.label+' として読み取りました',rows,notes};
+  }
+  if(type==='custom'){
+    const dflt=parseFloat($('tDepth').value)>0?parseFloat($('tDepth').value):10000, made=[];
+    (Array.isArray(r.parts)?r.parts:[]).slice(0,40).forEach((q,i)=>{
+      const ok=a=>Array.isArray(a)?clean(a.filter(c=>Array.isArray(c)&&isFinite(+c[0])&&isFinite(+c[1])).map(c=>[+c[0],+c[1]])):[];
+      const pts=ok(q&&q.pts); if(pts.length<3||area(pts)===0) return;
+      const d=posNum(q.depth), nm=String(q.name||'部材 '+(i+1)).slice(0,40);
+      made.push(newPart({name:nm, pts, holes:(Array.isArray(q.holes)?q.holes:[]).map(ok).filter(h=>h.length>=3), depth:d>0?d:dflt, pos:[0,1,2].map(j=>+((q.pos||[])[j])||0), yaw:+q.yaw||0, ai:true}));
+      rows.push([nm+' 奥行き', d>0?d:dflt, d>0?'':'読み取れず。仮の値', !(d>0)]);
+    });
+    if(!made.length) return null;
+    S.parts=S.parts.filter(p=>!p.tpl&&!p.ai).concat(made); S.sel=null;
+    if(r.name){ S.name=String(r.name).slice(0,60); $('pname').value=S.name; }
+    (Array.isArray(r.read)?r.read:[]).slice(0,30).forEach(x=>{ if(x&&x.item) rows.push([String(x.item), x.value, String(x.basis||''), false]); });
+    changed(true); return {title:'断面形状から '+made.length+' 個の部材を作りました',rows,notes};
+  }
+  return null;
+}
+function aiShow(res){
+  const tb=$('aiTbl'), ul=$('aiNotes'); tb.textContent=''; ul.textContent='';
+  res.rows.forEach(([a,b,c,guess])=>{ const tr=tb.insertRow(); if(guess) tr.className='guess'; [a,(typeof b==='number'?String(Math.round(b*1000)/1000):String(b??'')),c].forEach(t=>{ tr.insertCell().textContent=t; }); });
+  res.notes.forEach(n=>{ const li=document.createElement('li'); li.textContent=n; ul.appendChild(li); });
+  $('aiOut').hidden=false;
+}
+const AI_ERR={not_granted:'AIの利用が許可されなかったため、読み取りを行いませんでした。',sampling_disabled:'このアカウントではAI読み取りを使えません。',rate_limited:'利用上限に達したか、呼び出しが多すぎます。しばらく待ってからもう一度お試しください。',session_expired:'サインインし直してからもう一度お試しください。',image_rejected:'この画像は送れませんでした。別の図面ファイルでお試しください。',images_unavailable:'この画面では画像をAIに送れません。',refused:'この図面はAIが読み取りを行いませんでした。',invalid_json:'AIの返答を解釈できませんでした。もう一度お試しください。'};
+$('aiGo').onclick=async()=>{
+  if(!T.img) return aiMsg('先に図面を読み込んでください。');
+  if(!(window.claude&&window.claude.use)) return aiMsg('AI読み取りは、claude.ai で公開したページを開いたときに使えます。');
+  setMode('2d'); $('aiGo').disabled=true; $('aiOut').hidden=true; aiMsg('準備しています…');
+  try{
+    if(aiFn===undefined) aiFn=await window.claude.use('sample');
+    const lim=aiFn?await aiFn.limits().catch(()=>null):null;
+    if(!aiFn||!lim||!lim.images){ aiMsg('この画面ではAI読み取りを使えません。'); return; }
+    const blob=await viewBlob(); if(!blob){ aiMsg('図面が画面に映っていません。図面を表示してからお試しください。'); return; }
+    aiCtl=new AbortController(); $('aiStop').hidden=false;
+    aiMsg('AIが図面を読んでいます… 1〜2分かかることがあります。');
+    const r=await aiFn.json(aiPrompt(),{images:[blob],modelTier:'complex',signal:aiCtl.signal,onText:()=>aiMsg('AIが結果を書き出しています…')});
+    const res=r&&typeof r==='object'?aiApply(r):null;
+    if(!res){ aiMsg('構造物の寸法を読み取れませんでした。断面図を大きく表示してからもう一度お試しください。'); const n=r&&Array.isArray(r.notes)?r.notes.map(String):[]; if(n.length) aiShow({rows:[],notes:n}); return; }
+    aiShow(res); aiMsg(res.title+'。'); setMode('3d'); toast('3Dモデルを作成しました');
+  }catch(e){ const c=e&&e.code; aiMsg(c==='cancelled'?'中止しました。':(AI_ERR[c]||'AIとの通信に失敗しました。もう一度お試しください。')); }
+  finally{ $('aiGo').disabled=false; $('aiStop').hidden=true; aiCtl=null; }
+};
+$('aiStop').onclick=()=>{ if(aiCtl) aiCtl.abort(); };
+if(!(window.claude&&window.claude.use)) aiMsg('AI読み取りは、claude.ai で公開したページを開いたときに使えます。');
+
 /* ---------- 部材リスト・編集 ---------- */
 function renderParts(){
   const ul=$('plist'); ul.textContent=''; ul.hidden=!S.parts.length; $('pempty').hidden=!!S.parts.length;
@@ -519,7 +630,7 @@ function exportData(){ return JSON.stringify({app:'kozo3d',v:1,name:S.name,tpl:S
 function importData(o){
   if(!o||!Array.isArray(o.parts)) throw new Error('format');
   S.name=String(o.name||''); S.sel=null;
-  S.parts=o.parts.filter(p=>Array.isArray(p.pts)&&p.pts.length>=3).map(p=>newPart({name:String(p.name||'部材'),color:/^#[0-9a-f]{6}$/i.test(p.color)?p.color:CONCRETE,pts:clean(p.pts.map(q=>[+q[0]||0,+q[1]||0])),holes:(p.holes||[]).map(h=>clean(h.map(q=>[+q[0]||0,+q[1]||0]))).filter(h=>h.length>=3),depth:+p.depth>0?+p.depth:1000,pos:[0,1,2].map(i=>+(p.pos||[])[i]||0),yaw:+p.yaw||0,tpl:!!p.tpl,hidden:!!p.hidden,torg:p.torg}));
+  S.parts=o.parts.filter(p=>Array.isArray(p.pts)&&p.pts.length>=3).map(p=>newPart({name:String(p.name||'部材'),color:/^#[0-9a-f]{6}$/i.test(p.color)?p.color:CONCRETE,pts:clean(p.pts.map(q=>[+q[0]||0,+q[1]||0])),holes:(p.holes||[]).map(h=>clean(h.map(q=>[+q[0]||0,+q[1]||0]))).filter(h=>h.length>=3),depth:+p.depth>0?+p.depth:1000,pos:[0,1,2].map(i=>+(p.pos||[])[i]||0),yaw:+p.yaw||0,tpl:!!p.tpl,hidden:!!p.hidden,torg:p.torg,ai:!!p.ai}));
   if(o.tpl&&TPL[o.tpl.type]) S.tpl={type:o.tpl.type,params:Object.assign(tplDefaults(o.tpl.type),o.tpl.params)};
   $('pname').value=S.name; $('tplType').value=S.tpl.type; buildTplForm();
 }
@@ -589,7 +700,7 @@ let restored=false;
 try{ const s=localStorage.getItem('kozo3d.v1'); if(s){ importData(JSON.parse(s)); restored=true; } }catch(_){}
 if(!restored){ S.tpl.params=tplDefaults('retT'); $('pname').value=S.name; $('tplType').value='retT'; buildTplForm(); S.parts=TPL.retT.gen(S.tpl.params); S.parts.forEach(p=>p.tpl=true); }
 resize(); changed(true);
-window.__kozo={S,T,makeObj,makeStl,zip1,exportData};
+window.__kozo={S,T,aiPrompt,makeObj,makeStl,zip1,exportData};
 })();
 </script>
 

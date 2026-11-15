@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>構造物3Dモデラー</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<style>
+/* レイアウト: 1画面アプリ。左に操作パネル、右に3D/図面ビュー。スマホでは上にビュー、下にパネル。 */
+:root{
+  --bg:#eef1f4; --panel:#fbfcfd; --line:#cfd6dd; --fg:#16212c; --muted:#5b6875;
+  --ink:#1f4e79; --ink-fg:#ffffff; --mark:#d9620f; --field:#ffffff;
+  --view-bg:#dfe5ea; --grid:#b4bec8; --edge:#2a3440; --paper:#ffffff;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic UI","Noto Sans JP",sans-serif;
+  --f-num:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#12171c; --panel:#1a2128; --line:#34404b; --fg:#e4e9ee; --muted:#96a3b0;
+  --ink:#6aa9e0; --ink-fg:#0d1820; --mark:#ff9148; --field:#11161b;
+  --view-bg:#0f1418; --grid:#3a4652; --edge:#0a0d10; --paper:#e9edf0; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#12171c; --panel:#1a2128; --line:#34404b; --fg:#e4e9ee; --muted:#96a3b0;
+  --ink:#6aa9e0; --ink-fg:#0d1820; --mark:#ff9148; --field:#11161b;
+  --view-bg:#0f1418; --grid:#3a4652; --edge:#0a0d10; --paper:#e9edf0; color-scheme:dark }
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14px;line-height:1.55;
+  display:grid;grid-template-rows:auto 1fr;overflow:hidden}
+*{box-sizing:border-box}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-block:8px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  border-bottom:1px solid var(--line);background:var(--panel)}
+header h1{font-size:16px;font-weight:700;margin:0;letter-spacing:.04em}
+#pname{flex:1;min-width:120px;max-width:320px}
+main{display:grid;grid-template-columns:minmax(300px,380px) 1fr;min-height:0}
+#panel{display:flex;flex-direction:column;min-height:0;min-width:0;border-right:1px solid var(--line);background:var(--panel)}
+#tabs{display:flex;border-bottom:1px solid var(--line)}
+#tabs button{flex:1;border:0;background:none;color:var(--muted);font:inherit;font-weight:500;padding:10px 4px;cursor:pointer;border-bottom:3px solid transparent}
+#tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--ink)}
+.tab{overflow:auto;padding:14px 16px 24px;display:flex;flex-direction:column;gap:14px;min-height:0;flex:1}
+.tab h2{font-size:13px;margin:0;color:var(--muted);font-weight:700;letter-spacing:.08em}
+.tab p{margin:0;color:var(--muted);font-size:13px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+label.f{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);min-width:0}
+input,select,textarea{font:inherit;color:var(--fg);background:var(--field);border:1px solid var(--line);border-radius:4px;padding:6px 8px;min-width:0;width:100%}
+input[type=number],textarea,.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+input[type=checkbox]{width:auto}
+input[type=color]{padding:2px;height:34px}
+textarea{resize:vertical;min-height:110px;font-size:13px}
+button.b{font:inherit;font-weight:500;border:1px solid var(--line);background:var(--field);color:var(--fg);border-radius:4px;padding:7px 12px;cursor:pointer}
+button.b.pri{background:var(--ink);border-color:var(--ink);color:var(--ink-fg)}
+button.b[aria-pressed="true"]{border-color:var(--mark);box-shadow:inset 0 0 0 1px var(--mark);color:var(--mark)}
+button.b:disabled{opacity:.45;cursor:default}
+:focus-visible{outline:2px solid var(--mark);outline-offset:1px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.chk{display:flex;gap:6px;align-items:center;font-size:13px}
+.note{font-size:12px;color:var(--muted);border-left:3px solid var(--line);padding-left:8px}
+#msg{color:var(--mark);font-size:13px;min-height:1.5em}
+#plist{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+#plist li{display:grid;grid-template-columns:14px 1fr auto auto auto;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line);cursor:pointer}
+#plist li:last-child{border-bottom:0}
+#plist li[aria-current="true"]{background:color-mix(in srgb,var(--mark) 14%,transparent)}
+#plist .sw{width:14px;height:14px;border:1px solid var(--line)}
+#plist .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#plist .vol{font-family:var(--f-num);font-size:12px;color:var(--muted)}
+#plist button{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;padding:2px 4px}
+#view{position:relative;min-width:0;min-height:0;background:var(--view-bg)}
+#view canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
+#vbar{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:6px;flex-wrap:wrap;z-index:2;pointer-events:none}
+#vbar>*{pointer-events:auto}
+#vbar .seg{display:flex;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:var(--panel)}
+#vbar .seg button{border:0;background:none;color:var(--fg);font:inherit;padding:5px 10px;cursor:pointer}
+#vbar .seg button[aria-pressed="true"]{background:var(--ink);color:var(--ink-fg)}
+#stat{position:absolute;left:10px;bottom:10px;z-index:2;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 10px;font-size:12px;display:flex;gap:14px;flex-wrap:wrap;max-width:calc(100% - 20px)}
+#stat b{font-family:var(--f-num);font-weight:500}
+#toast{position:absolute;right:10px;bottom:10px;z-index:3;background:var(--fg);color:var(--bg);padding:8px 12px;border-radius:4px;font-size:13px;max-width:70%}
+@media (max-width:760px){
+  main{grid-template-columns:1fr;grid-template-rows:44% 1fr}
+  #view{order:-1}
+  #panel{border-right:0;border-top:1px solid var(--line)}
+  .tab{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  #stat{font-size:11px;gap:8px}
+}
+</style>
+
+<header>
+  <h1>構造物3Dモデラー</h1>
+  <input id="pname" aria-label="構造物の名称" value="">
+</header>
+<main>
+  <section id="panel">
+    <div id="tabs" role="tablist">
+      <button role="tab" data-tab="tpl" aria-selected="true">寸法入力</button>
+      <button role="tab" data-tab="trace" aria-selected="false">図面トレース</button>
+      <button role="tab" data-tab="parts" aria-selected="false">部材</button>
+      <button role="tab" data-tab="out" aria-selected="false">保存</button>
+    </div>
+
+    <div class="tab" id="tab-tpl">
+      <p>図面の寸法を入力すると、その場で3Dモデルになります。単位はすべて mm です。</p>
+      <label class="f">構造物の種類
+        <select id="tplType"></select>
+      </label>
+      <div class="grid2" id="tplForm"></div>
+      <div class="row">
+        <button class="b" id="tplClear">寸法入力の部材を消す</button>
+      </div>
+      <p class="note">ここで作った部材は「部材」タブで個別に色・位置・輪郭座標を直せます。図面トレースで追加した部材はそのまま残ります。</p>
+    </div>
+
+    <div class="tab" id="tab-trace" hidden>
+      <h2>1. 図面を読み込む</h2>
+      <div class="row">
+        <input type="file" id="dfile" accept="image/*,.pdf,application/pdf" aria-label="図面ファイル">
+      </div>
+      <div class="row">
+        <label class="f" style="width:90px">PDFのページ<input type="number" id="dpage" value="1" min="1"></label>
+        <button class="b" id="dsample">サンプル図面を使う</button>
+      </div>
+      <h2>2. 縮尺を合わせる</h2>
+      <p>寸法のわかっている2点（寸法線の両端など）を図面上でタップします。</p>
+      <div class="row">
+        <button class="b" id="tScale" aria-pressed="false">2点を指定する</button>
+        <span id="scaleInfo" class="num" style="font-size:12px"></span>
+      </div>
+      <div class="row" id="scaleForm" hidden>
+        <label class="f" style="width:140px">2点間の実寸 (mm)<input type="number" id="scaleLen" min="1"></label>
+        <button class="b pri" id="scaleOk" style="align-self:flex-end">確定</button>
+      </div>
+      <h2>3. 断面の輪郭をなぞる</h2>
+      <p>頂点を順にタップし、最初の点に戻るか「閉じて部材にする」を押します。ドラッグで図面を移動、ホイール／ピンチで拡大できます。</p>
+      <div class="row">
+        <button class="b" id="tTrace" aria-pressed="false">輪郭をなぞる</button>
+        <label class="chk"><input type="checkbox" id="tOrtho" checked>ほぼ水平・垂直な辺をまっすぐに揃える</label>
+      </div>
+      <label class="chk"><input type="checkbox" id="tHole">選択中の部材の空洞（中抜き）として追加</label>
+      <label class="f" style="width:160px">奥行き・延長 (mm)<input type="number" id="tDepth" value="10000" min="1"></label>
+      <div class="row">
+        <button class="b" id="tUndo">1点戻す</button>
+        <button class="b pri" id="tClose">閉じて部材にする</button>
+        <button class="b" id="tReset">やり直す</button>
+      </div>
+      <div id="msg" role="status"></div>
+    </div>
+
+    <div class="tab" id="tab-parts" hidden>
+      <ul id="plist"></ul>
+      <div id="pedit" hidden style="display:flex;flex-direction:column;gap:10px">
+        <h2>選択中の部材</h2>
+        <div class="grid2">
+          <label class="f">名称<input id="eName"></label>
+          <label class="f">色<input type="color" id="eColor"></label>
+          <label class="f">奥行き・延長 (mm)<input type="number" id="eDepth" min="1"></label>
+          <label class="f">回転（鉛直軸まわり °）<input type="number" id="eYaw" step="15"></label>
+          <label class="f">位置 X 横方向 (mm)<input type="number" id="eX"></label>
+          <label class="f">位置 Y 高さ (mm)<input type="number" id="eY"></label>
+          <label class="f">位置 Z 延長方向 (mm)<input type="number" id="eZ"></label>
+        </div>
+        <label class="f">輪郭の座標（1行に「横, 高さ」mm）
+          <textarea id="ePts" spellcheck="false"></textarea>
+        </label>
+        <div class="row"><button class="b pri" id="eApply">座標を反映</button><button class="b" id="eDup">複製</button></div>
+      </div>
+      <p id="pempty">部材はまだありません。「寸法入力」か「図面トレース」で作成してください。</p>
+    </div>
+
+    <div class="tab" id="tab-out" hidden>
+      <h2>作業データ</h2>
+      <p>入力内容はこのブラウザに自動保存されます。別の端末へ移すときはファイルに保存してください。</p>
+      <div class="row">
+        <button class="b pri" id="oSave">作業データを保存 (.json)</button>
+      </div>
+      <label class="f">作業データを開く<input type="file" id="oLoad" accept=".json,application/json"></label>
+      <h2>3Dモデルの書き出し</h2>
+      <p>単位はメートル、Y軸が鉛直上向きです。OBJはMacのプレビューや多くのCAD・3Dソフトで開けます。</p>
+      <div class="row">
+        <button class="b" id="oObj">OBJ形式</button>
+        <button class="b" id="oStl">STL形式</button>
+      </div>
+      <p class="note" id="oNote"></p>
+    </div>
+  </section>
+
+  <section id="view">
+    <canvas id="c3d"></canvas>
+    <canvas id="c2d" hidden></canvas>
+    <div id="vbar">
+      <div class="seg" id="vmode">
+        <button data-m="3d" aria-pressed="true">3D</button>
+        <button data-m="2d" aria-pressed="false">図面</button>
+      </div>
+      <div class="seg" id="vpre">
+        <button data-v="iso">斜め</button>
+        <button data-v="front">断面</button>
+        <button data-v="side">側面</button>
+        <button data-v="top">平面</button>
+      </div>
+    </div>
+    <div id="stat"></div>
+    <div id="toast" hidden role="status"></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+(function(){
+'use strict';
+const $ = id => document.getElementById(id);
+const PDF_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+const CONCRETE = '#b7bcc2';
+
+/* ---------- 状態 ---------- */
+const S = { name:'逆T型擁壁（例）', parts:[], tpl:{type:'retT', params:{}}, sel:null };
+let uid = 1;
+const newPart = o => Object.assign({id:uid++, name:'部材', color:CONCRETE, pts:[], holes:[], depth:1000, pos:[0,0,0], yaw:0, tpl:false, hidden:false}, o);
+
+function area(p){ let a=0; for(let i=0;i<p.length;i++){ const [x1,y1]=p[i],[x2,y2]=p[(i+1)%p.length]; a+=x1*y2-x2*y1; } return Math.abs(a)/2; }
+const volume = p => (area(p.pts) - p.holes.reduce((s,h)=>s+area(h),0)) * p.depth / 1e9; // m3
+function clean(pts){ // 連続する重複点を除く
+  const o=[]; for(const p of pts){ const q=o[o.length-1]; if(!q || Math.abs(q[0]-p[0])>1e-6 || Math.abs(q[1]-p[1])>1e-6) o.push([p[0],p[1]]); }
+  if(o.length>1){ const a=o[0], b=o[o.length-1]; if(Math.abs(a[0]-b[0])<1e-6 && Math.abs(a[1]-b[1])<1e-6) o.pop(); }
+  return o;
+}
+const rect = (x0,y0,x1,y1) => [[x0,y0],[x1,y0],[x1,y1],[x0,y1]];
+
+/* ---------- 寸法入力テンプレート ---------- */
+const TPL = {
+  retT:{ label:'逆T型擁壁', f:[['H','全高',5000],['B','底版幅',3500],['t1','底版厚',500],['toe','つま先版の長さ',800],['tt','たて壁 天端厚',400],['tb','たて壁 基部厚',600],['L','延長',10000]],
+    gen:p=>[newPart({name:'擁壁躯体', depth:p.L, pts:clean([[0,0],[p.B,0],[p.B,p.t1],[p.toe+p.tb,p.t1],[p.toe+p.tt,p.H],[p.toe,p.H],[p.toe,p.t1],[0,p.t1]])})] },
+  retL:{ label:'L型擁壁', f:[['H','全高',3000],['B','底版幅',2200],['t1','底版厚',400],['tt','たて壁 天端厚',300],['tb','たて壁 基部厚',400],['L','延長',10000]],
+    gen:p=>[newPart({name:'擁壁躯体', depth:p.L, pts:clean([[0,0],[p.B,0],[p.B,p.t1],[p.tb,p.t1],[p.tt,p.H],[0,p.H]])})] },
+  grav:{ label:'重力式擁壁', f:[['H','全高',3000],['top','天端幅',500],['n1','前面勾配 1:n',0.2,0.05],['n2','背面勾配 1:n',0.3,0.05],['L','延長',10000]],
+    gen:p=>[newPart({name:'擁壁躯体', depth:p.L, pts:clean([[0,0],[p.top+p.H*(p.n1+p.n2),0],[p.H*p.n1+p.top,p.H],[p.H*p.n1,p.H]])})] },
+  box:{ label:'ボックスカルバート', f:[['B0','内空幅',3000],['H0','内空高',2500],['tu','頂版厚',350],['tl','底版厚',350],['tw','側壁厚',350],['hn','ハンチ',300],['L','延長',8000]],
+    gen:p=>{ const W=p.B0+2*p.tw, H=p.H0+p.tu+p.tl, x0=p.tw, x1=p.tw+p.B0, y0=p.tl, y1=p.tl+p.H0, h=Math.max(0,Math.min(p.hn,p.B0/2-1,p.H0/2-1));
+      return [newPart({name:'函体', depth:p.L, pts:rect(0,0,W,H), holes:[clean([[x0+h,y0],[x1-h,y0],[x1,y0+h],[x1,y1-h],[x1-h,y1],[x0+h,y1],[x0,y1-h],[x0,y0+h]])]})]; } },
+  uch:{ label:'U型水路', f:[['B0','内幅',1500],['H0','内高',1200],['tw','側壁厚',200],['tl','底版厚',250],['L','延長',10000]],
+    gen:p=>{ const W=p.B0+2*p.tw, H=p.H0+p.tl; return [newPart({name:'U型水路', depth:p.L, pts:[[0,0],[W,0],[W,H],[W-p.tw,H],[W-p.tw,p.tl],[p.tw,p.tl],[p.tw,H],[0,H]]})]; } },
+  bridge:{ label:'桁橋（橋台・橋脚つき）', f:[['L','橋長',40000],['n','径間数',2,1],['W','全幅員',9000],['ts','床版厚',250],['ng','主桁本数',4,1],['hg','桁高',1600],['bg','桁幅',450],['cw','地覆幅',400],['ch','地覆高',350],['Ha','橋台高（底面〜桁座）',6000],['Hp','橋脚高（底面〜桁座）',8000]],
+    gen:p=>{
+      const out=[], n=Math.max(1,Math.round(p.n)), ng=Math.max(1,Math.round(p.ng)), W=p.W, Yb=Math.max(p.Ha,p.Hp), Yg=Yb+p.hg, Ys=Yg+p.ts;
+      out.push(newPart({name:'床版', color:'#c9cdd2', depth:p.L, pts:rect(-W/2,Yg,W/2,Ys)}));
+      for(const s of [-1,1]) out.push(newPart({name:'地覆（'+(s<0?'左':'右')+'）', color:'#d6d9dd', depth:p.L, pts:rect(s<0?-W/2:W/2-p.cw, Ys, s<0?-W/2+p.cw:W/2, Ys+p.ch)}));
+      const ov=W*0.12, sp=ng>1?(W-2*ov)/(ng-1):0;
+      for(let i=0;i<ng;i++){ const x=ng>1?-W/2+ov+sp*i:0; out.push(newPart({name:'主桁 G'+(i+1), color:'#8f9aa6', depth:p.L, pts:rect(x-p.bg/2,Yb,x+p.bg/2,Yg)})); }
+      // 橋台: 側面形状を橋軸直角方向に押し出す
+      const Ha=p.Ha, tpw=400, sw=900, heel=Ha*0.3, toeF=Ha*0.15, tf=Math.max(700,Ha*0.12), top=Ha+p.hg+p.ts;
+      const ab=[[-tpw-heel,0],[sw+toeF,0],[sw+toeF,tf],[sw,tf],[sw,Ha],[0,Ha],[0,top],[-tpw,top],[-tpw,tf],[-tpw-heel,tf]];
+      out.push(newPart({name:'橋台 A1', depth:W, pts:ab, yaw:-90, pos:[W/2,Yb-Ha,0]}));
+      out.push(newPart({name:'橋台 A2', depth:W, pts:ab, yaw:90, pos:[-W/2,Yb-Ha,p.L]}));
+      // 橋脚: 張出し式。正面形状を橋軸方向に押し出す
+      const Hp=p.Hp, tp=1500, hb=Math.min(1800,Hp*0.3), Wb=W*0.85, Wc=W*0.4, pf=Math.min(1500,Hp*0.2), fz=4500;
+      for(let i=1;i<n;i++){ const z=p.L*i/n, y=Yb-Hp;
+        out.push(newPart({name:'橋脚 P'+i+' 柱・梁', depth:tp, pos:[0,y,z-tp/2], pts:[[-Wc/2,pf],[Wc/2,pf],[Wc/2,Hp-hb],[Wb/2,Hp-hb*0.55],[Wb/2,Hp],[-Wb/2,Hp],[-Wb/2,Hp-hb*0.55],[-Wc/2,Hp-hb]]}));
+        out.push(newPart({name:'橋脚 P'+i+' フーチング', depth:fz, pos:[0,y,z-fz/2], pts:rect(-Wc/2-1500,0,Wc/2+1500,pf)}));
+      }
+      return out; } }
+};
+function tplDefaults(t){ const o={}; TPL[t].f.forEach(f=>o[f[0]]=f[2]); return o; }
+function applyTpl(){
+  const t=TPL[S.tpl.type]; if(!t) return;
+  const p=S.tpl.params; if(Object.values(p).some(v=>!isFinite(v))) return;
+  const gen=t.gen(p).filter(q=>q.pts.length>=3 && area(q.pts)>0 && q.depth>0); gen.forEach(q=>q.tpl=true);
+  S.parts = gen.concat(S.parts.filter(q=>!q.tpl));
+  if(!S.parts.some(q=>q.id===S.sel)) S.sel=null;
+  changed(true);
+}
+function buildTplForm(){
+  const t=TPL[S.tpl.type]; const box=$('tplForm'); box.textContent='';
+  t.f.forEach(([k,label,def,step])=>{
+    const l=document.createElement('label'); l.className='f'; l.textContent=label;
+    const i=document.createElement('input'); i.type='number'; i.id='tp_'+k; i.step=step||50; i.min=0; i.value=S.tpl.params[k] ?? def;
+    i.addEventListener('input',()=>{ S.tpl.params[k]=parseFloat(i.value); applyTpl(); });
+    l.appendChild(i); box.appendChild(l);
+  });
+}
+
+/* ---------- 3Dビュー ---------- */
+const c3d=$('c3d'), view=$('view');
+const renderer=new THREE.WebGLRenderer({canvas:c3d, antialias:true, preserveDrawingBuffer:true});
+const scene=new THREE.Scene(), cam=new THREE.PerspectiveCamera(40,1,0.05,5000);
+const group=new THREE.Group(); scene.add(group);
+scene.add(new THREE.HemisphereLight(0xffffff,0x56606a,1.5));
+const sun=new THREE.DirectionalLight(0xffffff,1.6); scene.add(sun);
+let gridObj=null, dirty=true, bbox=new THREE.Box3();
+const orb={th:-0.7, ph:1.1, dist:20, tg:new THREE.Vector3()};
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function draw3d(){ dirty=true; }
+function updCam(){
+  const s=Math.sin(orb.ph), d=orb.dist;
+  cam.position.set(orb.tg.x+d*s*Math.sin(orb.th), orb.tg.y+d*Math.cos(orb.ph), orb.tg.z+d*s*Math.cos(orb.th));
+  cam.lookAt(orb.tg); sun.position.copy(cam.position).add(new THREE.Vector3(5,12,3)); draw3d();
+}
+function fit(){
+  if(bbox.isEmpty()){ orb.tg.set(0,0,0); orb.dist=20; } else {
+    bbox.getCenter(orb.tg); const r=bbox.getSize(new THREE.Vector3()).length()/2;
+    const f=Math.min(1,cam.aspect); orb.dist=Math.max(1, r/Math.sin(cam.fov*Math.PI/360)/f*1.05);
+  } updCam();
+}
+function rebuild(){
+  group.traverse(o=>{ if(o.geometry) o.geometry.dispose(); if(o.material) o.material.dispose(); });
+  group.clear();
+  const edgeCol=new THREE.Color(css('--edge')), mark=new THREE.Color(css('--mark'));
+  for(const p of S.parts){
+    if(p.hidden || p.pts.length<3) continue;
+    const sh=new THREE.Shape(p.pts.map(q=>new THREE.Vector2(q[0]/1000,q[1]/1000)));
+    for(const h of p.holes) sh.holes.push(new THREE.Path(h.map(q=>new THREE.Vector2(q[0]/1000,q[1]/1000))));
+    const g=new THREE.ExtrudeGeometry(sh,{depth:p.depth/1000, bevelEnabled:false});
+    const sel=p.id===S.sel;
+    const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:p.color, roughness:.9, metalness:0, emissive:sel?mark:0x000000, emissiveIntensity:sel?.35:0}));
+    m.position.set(p.pos[0]/1000,p.pos[1]/1000,p.pos[2]/1000); m.rotation.y=p.yaw*Math.PI/180; m.userData.id=p.id; m.name=p.name;
+    m.add(new THREE.LineSegments(new THREE.EdgesGeometry(g,20),new THREE.LineBasicMaterial({color:edgeCol})));
+    group.add(m);
+  }
+  group.updateMatrixWorld(true); bbox.setFromObject(group);
+  if(gridObj){ scene.remove(gridObj); gridObj.geometry.dispose(); gridObj.material.dispose(); }
+  const sz=bbox.isEmpty()?20:Math.max(10,Math.ceil(bbox.getSize(new THREE.Vector3()).length()*1.6/10)*10);
+  gridObj=new THREE.GridHelper(sz,sz,css('--grid'),css('--grid')); gridObj.material.transparent=true; gridObj.material.opacity=.55;
+  const c=bbox.isEmpty()?new THREE.Vector3():bbox.getCenter(new THREE.Vector3());
+  gridObj.position.set(Math.round(c.x),bbox.isEmpty()?0:bbox.min.y-0.002,Math.round(c.z)); scene.add(gridObj);
+  scene.background=new THREE.Color(css('--view-bg'));
+  draw3d(); stat();
+}
+function stat(){
+  const el=$('stat'); el.textContent='';
+  const add=(k,v)=>{ const s=document.createElement('span'); s.append(k+' '); const b=document.createElement('b'); b.textContent=v; s.appendChild(b); el.appendChild(s); };
+  if(bbox.isEmpty()){ el.textContent='部材なし'; return; }
+  const z=bbox.getSize(new THREE.Vector3());
+  add('外形 幅×高×延長', z.x.toFixed(2)+' × '+z.y.toFixed(2)+' × '+z.z.toFixed(2)+' m');
+  add('体積', S.parts.reduce((s,p)=>s+(p.hidden?0:volume(p)),0).toFixed(2)+' m³');
+  add('部材', S.parts.length+' 個');
+}
+function resize(){
+  const w=view.clientWidth, h=view.clientHeight; if(!w||!h) return;
+  renderer.setPixelRatio(Math.min(2,window.devicePixelRatio||1)); renderer.setSize(w,h,false);
+  cam.aspect=w/h; cam.updateProjectionMatrix(); draw3d(); T.sizeDirty=true; draw2d();
+}
+(function loop(){ if(dirty && !c3d.hidden){ dirty=false; renderer.render(scene,cam); } requestAnimationFrame(loop); })();
+
+// ポインタ操作（回転・移動・拡大）を2つのキャンバスで共用
+function gestures(el, h){
+  const ps=new Map(); let moved=0, last=null;
+  el.addEventListener('pointerdown',e=>{ el.setPointerCapture(e.pointerId); ps.set(e.pointerId,{x:e.offsetX,y:e.offsetY}); if(ps.size===1) moved=0; last=null; });
+  el.addEventListener('pointermove',e=>{
+    const p=ps.get(e.pointerId); if(!p){ h.hover && h.hover(e.offsetX,e.offsetY); return; }
+    const dx=e.offsetX-p.x, dy=e.offsetY-p.y;
+    if(ps.size===1){ moved+=Math.abs(dx)+Math.abs(dy); p.x=e.offsetX; p.y=e.offsetY; if(moved>6) h.drag(dx,dy,e); }
+    else { p.x=e.offsetX; p.y=e.offsetY; const [a,b]=[...ps.values()]; const d=Math.hypot(a.x-b.x,a.y-b.y), cx=(a.x+b.x)/2, cy=(a.y+b.y)/2;
+      if(last){ h.pinch(d/last.d, cx, cy, cx-last.cx, cy-last.cy); } last={d,cx,cy}; moved=99; }
+  });
+  const up=e=>{ if(!ps.has(e.pointerId)) return; ps.delete(e.pointerId); last=null; if(ps.size===0 && moved<=6 && e.type==='pointerup') h.tap(e.offsetX,e.offsetY); };
+  el.addEventListener('pointerup',up); el.addEventListener('pointercancel',up);
+  el.addEventListener('wheel',e=>{ e.preventDefault(); h.pinch(Math.exp(-e.deltaY*0.0015), e.offsetX, e.offsetY, 0, 0); },{passive:false});
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+}
+function pan3d(dx,dy){
+  const k=orb.dist*2*Math.tan(cam.fov*Math.PI/360)/view.clientHeight;
+  const r=new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld,0), u=new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld,1);
+  orb.tg.addScaledVector(r,-dx*k).addScaledVector(u,dy*k);
+}
+gestures(c3d,{
+  drag(dx,dy,e){ if(e.shiftKey||e.buttons===2||e.buttons===4) pan3d(dx,dy); else { orb.th-=dx*0.008; orb.ph=Math.min(Math.PI-0.02,Math.max(0.02,orb.ph-dy*0.008)); } updCam(); },
+  pinch(f,cx,cy,dx,dy){ orb.dist=Math.min(3000,Math.max(0.3,orb.dist/f)); pan3d(dx,dy); updCam(); },
+  tap(x,y){
+    const rc=new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(x/view.clientWidth*2-1,-(y/view.clientHeight)*2+1),cam);
+    const hit=rc.intersectObjects(group.children,false)[0]; S.sel=hit?hit.object.userData.id:null; changed(false);
+    if(hit) showTab('parts');
+  }
+});
+const PRE={iso:[-0.7,1.1],front:[0,Math.PI/2],side:[-Math.PI/2,Math.PI/2],top:[0,0.02]};
+$('vpre').addEventListener('click',e=>{ const v=e.target.dataset.v; if(!v) return; setMode('3d'); orb.th=PRE[v][0]; orb.ph=PRE[v][1]; fit(); });
+
+/* ---------- 図面トレース ---------- */
+const c2d=$('c2d'), g2=c2d.getContext('2d');
+const T={img:null,w:0,h:0,k:1,ox:0,oy:0,tool:null,sp:[],ppm:null,pts:[],org:null,cur:null,sizeDirty:true};
+const msg = t => { $('msg').textContent=t||''; };
+function toImg(x,y){ return [(x-T.ox)/T.k,(y-T.oy)/T.k]; }
+function fit2d(){ const w=view.clientWidth,h=view.clientHeight; if(!T.img||!w) return; T.k=Math.min(w/T.w,h/T.h)*0.92; T.ox=(w-T.w*T.k)/2; T.oy=(h-T.h*T.k)/2; draw2d(); }
+function setImage(img,w,h){ T.img=img; T.w=w; T.h=h; T.sp=[]; T.ppm=null; T.pts=[]; T.org=null; $('scaleInfo').textContent=''; $('scaleForm').hidden=true; setMode('2d'); fit2d(); msg('図面を読み込みました。次に縮尺を合わせてください。'); }
+function snap(x,y){
+  if($('tOrtho').checked && T.pts.length){ const p=T.pts[T.pts.length-1]; const dx=Math.abs(x-p[0]), dy=Math.abs(y-p[1]); if(dy<dx*0.026) y=p[1]; else if(dx<dy*0.026) x=p[0]; } // 約1.5°以内なら水平・垂直に吸着、斜めの辺はそのまま
+  return [x,y];
+}
+function draw2d(){
+  if(c2d.hidden) return;
+  const w=view.clientWidth,h=view.clientHeight, dpr=Math.min(2,window.devicePixelRatio||1);
+  if(T.sizeDirty){ c2d.width=w*dpr; c2d.height=h*dpr; T.sizeDirty=false; }
+  g2.setTransform(dpr,0,0,dpr,0,0); g2.fillStyle=css('--view-bg'); g2.fillRect(0,0,w,h);
+  const mark=css('--mark'), ink=css('--ink');
+  if(!T.img){ g2.fillStyle=css('--muted'); g2.font='14px '+css('--f-body'); g2.textAlign='center'; g2.fillText('「図面トレース」タブから図面（画像・PDF）を読み込んでください',w/2,h/2); return; }
+  g2.drawImage(T.img,T.ox,T.oy,T.w*T.k,T.h*T.k);
+  const S2=p=>[p[0]*T.k+T.ox,p[1]*T.k+T.oy];
+  const dot=(p,c)=>{ const [x,y]=S2(p); g2.fillStyle=c; g2.beginPath(); g2.arc(x,y,4.5,0,7); g2.fill(); g2.strokeStyle='#fff'; g2.lineWidth=1.5; g2.stroke(); };
+  g2.font='500 12px '+css('--f-num'); g2.textAlign='center';
+  const tag=(a,b,c)=>{ if(!T.ppm) return; const [x1,y1]=S2(a),[x2,y2]=S2(b); const t=Math.round(Math.hypot(a[0]-b[0],a[1]-b[1])/T.ppm)+''; const tw=g2.measureText(t).width+8;
+    g2.fillStyle='rgba(255,255,255,.9)'; g2.fillRect((x1+x2)/2-tw/2,(y1+y2)/2-9,tw,17); g2.fillStyle=c; g2.fillText(t,(x1+x2)/2,(y1+y2)/2+4); };
+  if(T.sp.length){ g2.strokeStyle=ink; g2.lineWidth=2; g2.setLineDash([6,4]); g2.beginPath(); T.sp.forEach((p,i)=>{ const [x,y]=S2(p); i?g2.lineTo(x,y):g2.moveTo(x,y); }); g2.stroke(); g2.setLineDash([]); T.sp.forEach(p=>dot(p,ink)); if(T.sp.length===2) tag(T.sp[0],T.sp[1],ink); }
+  if(T.pts.length){
+    const pts=T.pts.slice(); if(T.tool==='trace' && T.cur) pts.push(snap(T.cur[0],T.cur[1]));
+    g2.strokeStyle=mark; g2.lineWidth=2.5; g2.beginPath(); pts.forEach((p,i)=>{ const [x,y]=S2(p); i?g2.lineTo(x,y):g2.moveTo(x,y); }); g2.stroke();
+    for(let i=1;i<pts.length;i++) tag(pts[i-1],pts[i],'#8a3a00');
+    T.pts.forEach((p,i)=>dot(p,i?mark:'#0a7d3c'));
+  }
+}
+gestures(c2d,{
+  drag(dx,dy){ T.ox+=dx; T.oy+=dy; draw2d(); },
+  pinch(f,cx,cy,dx,dy){ const k=Math.min(40,Math.max(0.02,T.k*f)); f=k/T.k; T.ox=cx-(cx-T.ox)*f+dx; T.oy=cy-(cy-T.oy)*f+dy; T.k=k; draw2d(); },
+  hover(x,y){ if(T.tool==='trace' && T.pts.length){ T.cur=toImg(x,y); draw2d(); } },
+  tap(x,y){
+    if(!T.img) return; const p=toImg(x,y);
+    if(T.tool==='scale'){ if(T.sp.length>=2) T.sp=[]; T.sp.push(p); if(T.sp.length===2){ $('scaleForm').hidden=false; $('scaleLen').focus(); msg('2点間の実寸を入力して「確定」を押してください。'); } }
+    else if(T.tool==='trace'){
+      if(T.pts.length>=3){ const f=T.pts[0]; if(Math.hypot((f[0]-p[0])*T.k,(f[1]-p[1])*T.k)<14){ finishTrace(); return; } }
+      T.pts.push(snap(p[0],p[1])); T.cur=null; msg(T.pts.length+' 点目。最初の点（緑）をタップすると閉じます。');
+    } else msg('「2点を指定する」または「輪郭をなぞる」を押してから図面をタップしてください。');
+    draw2d();
+  }
+});
+function setTool(t){ T.tool=T.tool===t?null:t; $('tScale').setAttribute('aria-pressed',T.tool==='scale'); $('tTrace').setAttribute('aria-pressed',T.tool==='trace'); c2d.style.cursor=T.tool?'crosshair':'grab'; if(T.tool) setMode('2d'); }
+$('tScale').onclick=()=>{ if(!T.img) return msg('先に図面を読み込んでください。'); setTool('scale'); msg(T.tool?'寸法のわかっている2点をタップしてください。':''); };
+$('tTrace').onclick=()=>{ if(!T.img) return msg('先に図面を読み込んでください。'); if(!T.ppm) return msg('先に縮尺を合わせてください。'); setTool('trace'); msg(T.tool?'断面の頂点を順にタップしてください。':''); };
+$('scaleOk').onclick=()=>{
+  const L=parseFloat($('scaleLen').value); if(!(L>0)||T.sp.length<2) return msg('実寸を mm で入力してください。');
+  T.ppm=Math.hypot(T.sp[0][0]-T.sp[1][0],T.sp[0][1]-T.sp[1][1])/L; $('scaleForm').hidden=true;
+  $('scaleInfo').textContent='設定済み（図面1px = '+(1/T.ppm).toFixed(2)+' mm）'; T.tool='scale'; setTool('scale'); msg('縮尺を設定しました。「輪郭をなぞる」で断面をなぞってください。'); draw2d();
+};
+$('tUndo').onclick=()=>{ T.pts.pop(); draw2d(); };
+$('tReset').onclick=()=>{ T.pts=[]; msg(''); draw2d(); };
+$('tClose').onclick=()=>finishTrace();
+$('tOrtho').onchange=draw2d;
+function finishTrace(){
+  if(!T.ppm) return msg('先に縮尺を合わせてください。');
+  if(T.pts.length<3) return msg('頂点が3点以上必要です。');
+  const raw=T.pts.map(p=>[p[0]/T.ppm,-p[1]/T.ppm]);
+  const u0=Math.min(...raw.map(p=>p[0])), v0=Math.min(...raw.map(p=>p[1]));
+  if(!T.org) T.org=[u0,v0];
+  const tgt=S.parts.find(p=>p.id===S.sel);
+  if($('tHole').checked){
+    if(!tgt||!tgt.torg) { return msg('空洞を追加する部材を「部材」タブで選んでください（図面トレースで作った部材が対象です）。'); }
+    tgt.holes.push(clean(raw.map(p=>[Math.round(p[0]-tgt.torg[0]),Math.round(p[1]-tgt.torg[1])]))); toast('空洞を追加しました');
+  } else {
+    const d=parseFloat($('tDepth').value); if(!(d>0)) return msg('奥行き・延長を mm で入力してください。');
+    const n=S.parts.filter(p=>!p.tpl).length+1;
+    const part=newPart({name:'トレース部材 '+n, depth:d, pts:clean(raw.map(p=>[Math.round(p[0]-u0),Math.round(p[1]-v0)])), pos:[Math.round(u0-T.org[0]),Math.round(v0-T.org[1]),0], torg:[u0,v0]});
+    S.parts.push(part); S.sel=part.id; toast('部材を追加しました。「3D」で確認できます');
+  }
+  T.pts=[]; T.cur=null; msg('追加しました。続けて別の輪郭もなぞれます。'); changed(true); draw2d();
+}
+function loadScript(src){ return new Promise((ok,ng)=>{ const s=document.createElement('script'); s.src=src; s.onload=ok; s.onerror=()=>ng(new Error('load')); document.head.appendChild(s); }); }
+async function openDrawing(file){
+  try{
+    if(/pdf$/i.test(file.type)||/\.pdf$/i.test(file.name)){
+      msg('PDFを読み込んでいます…');
+      if(!window.pdfjsLib){ await loadScript(PDF_CDN+'pdf.min.js'); await loadScript(PDF_CDN+'pdf.worker.min.js'); }
+      const doc=await window.pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+      const n=Math.min(doc.numPages,Math.max(1,parseInt($('dpage').value)||1)); $('dpage').value=n; $('dpage').max=doc.numPages;
+      const page=await doc.getPage(n); let vp=page.getViewport({scale:1}); vp=page.getViewport({scale:Math.min(4,3000/Math.max(vp.width,vp.height))});
+      const cv=document.createElement('canvas'); cv.width=Math.ceil(vp.width); cv.height=Math.ceil(vp.height);
+      const cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height);
+      await page.render({canvasContext:cx,viewport:vp}).promise; setImage(cv,cv.width,cv.height);
+      if(doc.numPages>1) msg('全 '+doc.numPages+' ページ中 '+n+' ページ目を表示しています。ページ番号を変えるとそのページを開きます。');
+    } else {
+      const img=new Image(); img.onload=()=>setImage(img,img.naturalWidth,img.naturalHeight); img.onerror=()=>msg('この画像は開けませんでした。PNG・JPEG・PDFを選んでください。'); img.src=URL.createObjectURL(file);
+    }
+  }catch(e){ msg('図面を開けませんでした。ファイルが壊れていないか、通信状態を確認してください。'); }
+}
+$('dfile').onchange=e=>{ if(e.target.files[0]) openDrawing(e.target.files[0]); };
+$('dpage').onchange=()=>{ const f=$('dfile').files[0]; if(f) openDrawing(f); };
+$('dsample').onclick=()=>{
+  const cv=document.createElement('canvas'); cv.width=1400; cv.height=1000; const g=cv.getContext('2d'), k=0.15, X=420, Y=880;
+  g.fillStyle='#fff'; g.fillRect(0,0,1400,1000); g.strokeStyle='#111'; g.fillStyle='#111'; g.lineWidth=3;
+  const P=[[0,0],[3500,0],[3500,500],[1400,500],[1200,5000],[800,5000],[800,500],[0,500]];
+  g.beginPath(); P.forEach((p,i)=>{ const x=X+p[0]*k,y=Y-p[1]*k; i?g.lineTo(x,y):g.moveTo(x,y); }); g.closePath(); g.stroke();
+  g.lineWidth=1; g.font='22px sans-serif'; g.textAlign='center';
+  const dimH=(x1,x2,y,t)=>{ g.beginPath(); g.moveTo(X+x1*k,y); g.lineTo(X+x2*k,y); g.moveTo(X+x1*k,y-8); g.lineTo(X+x1*k,y+8); g.moveTo(X+x2*k,y-8); g.lineTo(X+x2*k,y+8); g.stroke(); g.fillText(t,X+(x1+x2)/2*k,y-8); };
+  const dimV=(y1,y2,x,t)=>{ g.beginPath(); g.moveTo(x,Y-y1*k); g.lineTo(x,Y-y2*k); g.moveTo(x-8,Y-y1*k); g.lineTo(x+8,Y-y1*k); g.moveTo(x-8,Y-y2*k); g.lineTo(x+8,Y-y2*k); g.stroke(); g.save(); g.translate(x-10,Y-(y1+y2)/2*k); g.rotate(-Math.PI/2); g.fillText(t,0,0); g.restore(); };
+  dimH(0,3500,Y+50,'3500'); dimH(0,800,Y+90,'800'); dimH(800,1200,Y-5000*k-20,'400'); dimV(0,5000,X-60,'5000'); dimV(0,500,X+3500*k+60,'500');
+  g.font='bold 30px sans-serif'; g.fillText('擁壁 標準断面図（サンプル）',700,60); g.font='20px sans-serif'; g.fillText('単位: mm',700,95);
+  setImage(cv,1400,1000); msg('サンプル図面です。底版幅 3500 の寸法線の両端を使って縮尺を合わせてみてください。');
+};
+
+/* ---------- 部材リスト・編集 ---------- */
+function renderParts(){
+  const ul=$('plist'); ul.textContent=''; ul.hidden=!S.parts.length; $('pempty').hidden=!!S.parts.length;
+  S.parts.forEach(p=>{
+    const li=document.createElement('li'); li.setAttribute('aria-current',p.id===S.sel);
+    const sw=document.createElement('span'); sw.className='sw'; sw.style.background=p.color;
+    const nm=document.createElement('span'); nm.className='nm'; nm.textContent=p.name;
+    const vol=document.createElement('span'); vol.className='vol'; vol.textContent=volume(p).toFixed(2)+' m³';
+    const eye=document.createElement('button'); eye.textContent=p.hidden?'表示':'隠す'; eye.onclick=e=>{ e.stopPropagation(); p.hidden=!p.hidden; changed(false); };
+    const del=document.createElement('button'); del.textContent='削除'; del.onclick=e=>{ e.stopPropagation(); S.parts=S.parts.filter(q=>q!==p); if(S.sel===p.id) S.sel=null; changed(false); };
+    li.append(sw,nm,vol,eye,del); li.onclick=()=>{ S.sel=S.sel===p.id?null:p.id; changed(false); }; ul.appendChild(li);
+  });
+  const p=S.parts.find(q=>q.id===S.sel); $('pedit').hidden=!p;
+  if(p && !$('pedit').contains(document.activeElement)){
+    $('eName').value=p.name; $('eColor').value=p.color; $('eDepth').value=p.depth; $('eYaw').value=p.yaw;
+    $('eX').value=p.pos[0]; $('eY').value=p.pos[1]; $('eZ').value=p.pos[2];
+    $('ePts').value=p.pts.map(q=>q[0]+', '+q[1]).join('\n');
+  }
+}
+function bindEdit(id,fn){ $(id).addEventListener('input',()=>{ const p=S.parts.find(q=>q.id===S.sel); if(!p) return; fn(p,$(id).value); p.tpl=false; changed(false); }); }
+const num=v=>{ const n=parseFloat(v); return isFinite(n)?n:0; };
+bindEdit('eName',(p,v)=>p.name=v); bindEdit('eColor',(p,v)=>p.color=v);
+bindEdit('eDepth',(p,v)=>{ if(num(v)>0) p.depth=num(v); }); bindEdit('eYaw',(p,v)=>p.yaw=num(v));
+bindEdit('eX',(p,v)=>p.pos[0]=num(v)); bindEdit('eY',(p,v)=>p.pos[1]=num(v)); bindEdit('eZ',(p,v)=>p.pos[2]=num(v));
+$('eApply').onclick=()=>{
+  const p=S.parts.find(q=>q.id===S.sel); if(!p) return;
+  const pts=clean($('ePts').value.split(/\n/).map(l=>l.split(/[,\s\t]+/).filter(Boolean).map(Number)).filter(a=>a.length>=2&&isFinite(a[0])&&isFinite(a[1])));
+  if(pts.length<3||area(pts)===0) return toast('座標は3点以上、1行に「横, 高さ」で入力してください');
+  p.pts=pts; p.tpl=false; changed(false); toast('輪郭を更新しました');
+};
+$('eDup').onclick=()=>{ const p=S.parts.find(q=>q.id===S.sel); if(!p) return; const c=newPart(JSON.parse(JSON.stringify(p))); c.id=uid++; c.tpl=false; c.name=p.name+' のコピー'; c.pos[2]+=p.depth; S.parts.push(c); S.sel=c.id; changed(true); };
+
+/* ---------- 保存・書き出し ---------- */
+function exportData(){ return JSON.stringify({app:'kozo3d',v:1,name:S.name,tpl:S.tpl,parts:S.parts},null,1); }
+function importData(o){
+  if(!o||!Array.isArray(o.parts)) throw new Error('format');
+  S.name=String(o.name||''); S.sel=null;
+  S.parts=o.parts.filter(p=>Array.isArray(p.pts)&&p.pts.length>=3).map(p=>newPart({name:String(p.name||'部材'),color:/^#[0-9a-f]{6}$/i.test(p.color)?p.color:CONCRETE,pts:clean(p.pts.map(q=>[+q[0]||0,+q[1]||0])),holes:(p.holes||[]).map(h=>clean(h.map(q=>[+q[0]||0,+q[1]||0]))).filter(h=>h.length>=3),depth:+p.depth>0?+p.depth:1000,pos:[0,1,2].map(i=>+(p.pos||[])[i]||0),yaw:+p.yaw||0,tpl:!!p.tpl,hidden:!!p.hidden,torg:p.torg}));
+  if(o.tpl&&TPL[o.tpl.type]) S.tpl={type:o.tpl.type,params:Object.assign(tplDefaults(o.tpl.type),o.tpl.params)};
+  $('pname').value=S.name; $('tplType').value=S.tpl.type; buildTplForm();
+}
+function tris(){ // ワールド座標の三角形を部材ごとに返す
+  const out=[]; group.updateMatrixWorld(true);
+  group.children.forEach(m=>{ const g=m.geometry, pos=g.attributes.position, idx=g.index, n=idx?idx.count:pos.count, v=new THREE.Vector3(), a=[];
+    for(let i=0;i<n;i++){ v.fromBufferAttribute(pos,idx?idx.getX(i):i).applyMatrix4(m.matrixWorld); a.push(v.x,v.y,v.z); } out.push({name:m.name,a}); });
+  return out;
+}
+function makeObj(){ let s='# 構造物3Dモデラー / 単位 m / Y-up\n', b=1;
+  tris().forEach((t,i)=>{ s+='o '+(t.name.replace(/\s+/g,'_')||'part')+'_'+(i+1)+'\n'; for(let j=0;j<t.a.length;j+=3) s+='v '+t.a[j].toFixed(4)+' '+t.a[j+1].toFixed(4)+' '+t.a[j+2].toFixed(4)+'\n';
+    for(let j=0;j<t.a.length/3;j+=3) s+='f '+(b+j)+' '+(b+j+1)+' '+(b+j+2)+'\n'; b+=t.a.length/3; }); return s; }
+function makeStl(){ const all=tris().flatMap(t=>t.a), n=all.length/9, buf=new ArrayBuffer(84+n*50), dv=new DataView(buf); dv.setUint32(80,n,true);
+  const A=new THREE.Vector3(),B=new THREE.Vector3(),C=new THREE.Vector3(),N=new THREE.Vector3();
+  for(let i=0;i<n;i++){ const o=84+i*50, k=i*9; A.set(all[k],all[k+1],all[k+2]); B.set(all[k+3],all[k+4],all[k+5]); C.set(all[k+6],all[k+7],all[k+8]);
+    N.subVectors(B,A).cross(C.clone().sub(A)).normalize(); [N,A,B,C].forEach((v,j)=>{ dv.setFloat32(o+j*12,v.x,true); dv.setFloat32(o+j*12+4,v.y,true); dv.setFloat32(o+j*12+8,v.z,true); }); }
+  return new Uint8Array(buf); }
+function zip1(name,bytes){ // 無圧縮ZIP（1ファイル）
+  const tb=[]; for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=c&1?0xEDB88320^(c>>>1):c>>>1; tb[n]=c>>>0; }
+  let crc=0xFFFFFFFF; for(let i=0;i<bytes.length;i++) crc=tb[(crc^bytes[i])&255]^(crc>>>8); crc=(crc^0xFFFFFFFF)>>>0;
+  const fn=new TextEncoder().encode(name), L=bytes.length, out=new Uint8Array(30+fn.length+L+46+fn.length+22), dv=new DataView(out.buffer);
+  let o=0; dv.setUint32(o,0x04034b50,true); dv.setUint16(o+4,20,true); dv.setUint16(o+6,0x800,true); dv.setUint32(o+14,crc,true); dv.setUint32(o+18,L,true); dv.setUint32(o+22,L,true); dv.setUint16(o+26,fn.length,true);
+  out.set(fn,30); out.set(bytes,30+fn.length); o=30+fn.length+L; const cd=o;
+  dv.setUint32(o,0x02014b50,true); dv.setUint16(o+4,20,true); dv.setUint16(o+6,20,true); dv.setUint16(o+8,0x800,true); dv.setUint32(o+16,crc,true); dv.setUint32(o+20,L,true); dv.setUint32(o+24,L,true); dv.setUint16(o+28,fn.length,true);
+  out.set(fn,o+46); o+=46+fn.length; dv.setUint32(o,0x06054b50,true); dv.setUint16(o+8,1,true); dv.setUint16(o+10,1,true); dv.setUint32(o+12,o-cd,true); dv.setUint32(o+16,cd,true);
+  return out; }
+let dlCap; // 公開ページ上ではビューア経由で保存する
+async function saveFile(name,data){
+  const bytes=typeof data==='string'?new TextEncoder().encode(data):data;
+  if(window.claude&&window.claude.use){
+    if(dlCap===undefined) dlCap=await window.claude.use('downloads');
+    if(!dlCap) return toast('この画面ではファイルを保存できません');
+    let fn=name, d=bytes; if(!/\.(json|txt|zip)$/i.test(name)){ d=zip1(name,bytes); fn=name.replace(/\.\w+$/,'')+'.zip'; }
+    try{ await dlCap.save({filename:fn,data:d}); toast('保存しました'); }
+    catch(e){ if(!e||e.code!=='declined') toast(e&&e.code==='rate_limited'?'少し待ってからもう一度お試しください':'この画面ではファイルを保存できません'); }
+    return;
+  }
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([bytes])); a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+const fbase=()=> (S.name||'structure').replace(/[\\/:*?"<>|\s]+/g,'_').slice(0,60)||'structure';
+$('oSave').onclick=()=>saveFile(fbase()+'.json',exportData());
+$('oObj').onclick=()=>{ if(!group.children.length) return toast('書き出す部材がありません'); saveFile(fbase()+'.obj',makeObj()); };
+$('oStl').onclick=()=>{ if(!group.children.length) return toast('書き出す部材がありません'); saveFile(fbase()+'.stl',makeStl()); };
+$('oLoad').onchange=async e=>{ const f=e.target.files[0]; if(!f) return; try{ importData(JSON.parse(await f.text())); changed(true); toast('作業データを開きました'); }catch(_){ toast('このファイルは開けません。このアプリで保存した .json を選んでください'); } e.target.value=''; };
+if(window.claude&&window.claude.use) $('oNote').textContent='このページ上では、OBJ・STLはZIPファイルに入れて保存されます。';
+else $('oNote').hidden=true;
+
+/* ---------- 共通 ---------- */
+let toastT; function toast(t){ const el=$('toast'); el.textContent=t; el.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>el.hidden=true,3200); }
+function changed(refit){ rebuild(); renderParts(); if(refit) fit(); try{ localStorage.setItem('kozo3d.v1',exportData()); }catch(_){} }
+function showTab(t){ document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===t)); ['tpl','trace','parts','out'].forEach(k=>$('tab-'+k).hidden=k!==t); if(t==='parts') renderParts(); }
+function setMode(m){ c3d.hidden=m!=='3d'; c2d.hidden=m!=='2d'; $('vpre').hidden=m!=='3d'; $('stat').hidden=m!=='3d';
+  document.querySelectorAll('#vmode button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.m===m)); if(m==='2d'){ T.sizeDirty=true; draw2d(); } else draw3d(); }
+$('tabs').addEventListener('click',e=>{ const t=e.target.dataset.tab; if(!t) return; showTab(t); if(t==='trace') setMode('2d'); else if(t==='tpl') setMode('3d'); });
+$('vmode').addEventListener('click',e=>{ if(e.target.dataset.m) setMode(e.target.dataset.m); });
+$('pname').addEventListener('input',()=>{ S.name=$('pname').value; try{ localStorage.setItem('kozo3d.v1',exportData()); }catch(_){} });
+Object.keys(TPL).forEach(k=>{ const o=document.createElement('option'); o.value=k; o.textContent=TPL[k].label; $('tplType').appendChild(o); });
+$('tplType').onchange=()=>{ S.tpl={type:$('tplType').value,params:tplDefaults($('tplType').value)}; if(!S.name||Object.values(TPL).some(t=>S.name===t.label+'（例）')) { S.name=TPL[S.tpl.type].label+'（例）'; $('pname').value=S.name; } buildTplForm(); applyTpl(); };
+$('tplClear').onclick=()=>{ S.parts=S.parts.filter(p=>!p.tpl); changed(true); };
+new ResizeObserver(resize).observe(view);
+const retheme=()=>{ rebuild(); draw2d(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',retheme);
+new MutationObserver(retheme).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+
+// 起動: 前回の続き、なければ逆T型擁壁の例
+let restored=false;
+try{ const s=localStorage.getItem('kozo3d.v1'); if(s){ importData(JSON.parse(s)); restored=true; } }catch(_){}
+if(!restored){ S.tpl.params=tplDefaults('retT'); $('pname').value=S.name; $('tplType').value='retT'; buildTplForm(); S.parts=TPL.retT.gen(S.tpl.params); S.parts.forEach(p=>p.tpl=true); }
+resize(); changed(true);
+window.__kozo={S,T,makeObj,makeStl,zip1,exportData};
+})();
+</script>
+
+</body>
+</html>

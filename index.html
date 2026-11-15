@@ -338,7 +338,7 @@ function hzOf(q,L){
   if(q.hz&&q.hz.length) return q.hz;
   const R=+q.R||0; if(!R||Math.abs(L/R)>=5.9) return [];
   let a=Math.max(0,+q.ls1||0), b=Math.max(0,+q.ls2||0); if(a+b>L){ const c=L/(a+b); a*=c; b*=c; }
-  return [[a,0,R],[L-a-b,R,R],[b,R,0]];
+  return [[a,0,R],[L-a-b,R,R],[b,R,0]].filter(x=>x[0]>0);
 }
 // 線形: 平面（直線・円弧・クロソイドの連続）、縦断（勾配と縦断曲線の連続）、片勾配を
 // 距離 st(mm) の関数として返す。平面と縦断は曲率・勾配を数値積分して求める。
@@ -350,7 +350,7 @@ function alignOf(q,L){
     F.push(f1); X.push(X[i]+Math.sin(fm)*h); Z.push(Z[i]+Math.cos(fm)*h); Y.push(Y[i]+(gr(i*h)+gr((i+1)*h))/2*h); turn+=Math.abs(k0+k1)/2*h; }
   const tab=(A,st)=>{ const u=Math.min(N,Math.max(0,st/h)), i=Math.min(N-1,Math.floor(u)); return A[i]+(A[i+1]-A[i])*(u-i); };
   return { pos:st=>({x:tab(X,st),z:tab(Z,st),f:tab(F,st)}), rise:st=>st<0?gr(0)*st:st>L?Y[N]+gr(L)*(st-L):tab(Y,st), sup:st=>su(Math.min(L,Math.max(0,st))),
-    turn, bend:turn>0||!gr.flat||!su.flat, breaks:[...kap.breaks,...gr.breaks,...su.breaks] };
+    grade:st=>gr(Math.min(L,Math.max(0,st))), turn, bend:turn>0||!gr.flat||!su.flat, breaks:[...kap.breaks,...gr.breaks,...su.breaks] };
 }
 const NOALN={R:0,g1:0,g2:0,e1:0,e2:0};
 function clean(pts){ // 連続する重複点を除く
@@ -400,21 +400,22 @@ const TPL = {
         out.push(newPart(Object.assign({name:'主桁 G'+(i+1), color:'#8f9aa6', pts:sec(0), secs:hg2>hg?us.map(u=>[u/L,sec(u)]):null},sup))); }
       // 下部工は支承線（橋軸直角から斜角ぶん振った線）に平行に置く
       const deg=r=>r*180/Math.PI, Wl=W/Math.cos(sk);
-      const line=st=>{ const a=A.pos(st), ps=a.f-sk; return {x:a.x,z:a.z,up:A.rise(st),ps,dx:Math.cos(ps),dz:-Math.sin(ps),ex:Math.sin(ps),ez:Math.cos(ps)}; };
+      const line=st=>{ const a=A.pos(st), ps=a.f-sk; return {x:a.x,z:a.z,up:A.rise(st),m:-A.sup(st)*Math.cos(sk)+A.grade(st)*Math.sin(sk),ps,   // m: 支承線に沿った天端の傾き（片勾配と、斜角による縦断の影響）
+        dx:Math.cos(ps),dz:-Math.sin(ps),ex:Math.sin(ps),ez:Math.cos(ps)}; };
       // 橋台: 側面形状を支承線方向に押し出す
       const Ha=p.Ha, tpw=400, sw=900, heel=Ha*0.3, toeF=Ha*0.15, tf=Math.max(700,Ha*0.12), top=Ha+hg+p.ts, ya=Yg-hg-Ha;
-      const ab=[[-tpw-heel,0],[sw+toeF,0],[sw+toeF,tf],[sw,tf],[sw,Ha],[0,Ha],[0,top],[-tpw,top],[-tpw,tf],[-tpw-heel,tf]];
+      const ab=dy=>[[-tpw-heel,0],[sw+toeF,0],[sw+toeF,tf],[sw,tf],[sw,Ha+dy],[0,Ha+dy],[0,top+dy],[-tpw,top+dy],[-tpw,tf],[-tpw-heel,tf]]; // dy: 桁座・胸壁天端の上げ下げ
       const a1=line(0), a2=line(L);
-      out.push(newPart({name:'橋台 A1', depth:Wl, pts:ab, yaw:deg(a1.ps)-90, pos:[a1.x+a1.dx*Wl/2,ya+a1.up,a1.z+a1.dz*Wl/2]}));
-      out.push(newPart({name:'橋台 A2', depth:Wl, pts:ab, yaw:deg(a2.ps)+90, pos:[a2.x-a2.dx*Wl/2,ya+a2.up,a2.z-a2.dz*Wl/2]}));
+      out.push(newPart({name:'橋台 A1', depth:Wl, pts:ab(a1.m*Wl/2), pts2:a1.m?ab(-a1.m*Wl/2):null, yaw:deg(a1.ps)-90, pos:[a1.x+a1.dx*Wl/2,ya+a1.up,a1.z+a1.dz*Wl/2]}));
+      out.push(newPart({name:'橋台 A2', depth:Wl, pts:ab(-a2.m*Wl/2), pts2:a2.m?ab(a2.m*Wl/2):null, yaw:deg(a2.ps)+90, pos:[a2.x-a2.dx*Wl/2,ya+a2.up,a2.z-a2.dz*Wl/2]}));
       // 橋脚: 張出し式。梁は正面形状を押し出し、柱は壁柱または円柱
       const Hp=p.Hp, hb=Math.min(1800,Hp*0.3), Wb=W*0.85/Math.cos(sk), pf=Math.min(1500,Hp*0.2), fz=4500, cyl=Math.round(p.pc)===1&&p.Dc>0;
       const Wc=cyl?p.Dc:W*0.4/Math.cos(sk), tp=cyl?Math.max(1500,p.Dc):1500, y=Yg-hg2-Hp;
-      for(let i=1;i<n;i++){ const c=line(span*i), at=t=>[c.x-c.ex*t/2,y+c.up,c.z-c.ez*t/2], yaw=deg(c.ps);
+      for(let i=1;i<n;i++){ const c=line(span*i), at=t=>[c.x-c.ex*t/2,y+c.up,c.z-c.ez*t/2], yaw=deg(c.ps), tl=c.m*Wb/2; // tl: 梁の端での天端の上げ下げ
         if(cyl){
-          out.push(newPart({name:'橋脚 P'+i+' 梁', depth:tp, yaw, pos:at(tp), pts:[[-Wc/2,Hp-hb],[Wc/2,Hp-hb],[Wb/2,Hp-hb*0.55],[Wb/2,Hp],[-Wb/2,Hp],[-Wb/2,Hp-hb*0.55]]}));
+          out.push(newPart({name:'橋脚 P'+i+' 梁', depth:tp, yaw, pos:at(tp), pts:[[-Wc/2,Hp-hb],[Wc/2,Hp-hb],[Wb/2,Hp-hb*0.55+tl],[Wb/2,Hp+tl],[-Wb/2,Hp-tl],[-Wb/2,Hp-hb*0.55-tl]]}));
           out.push(newPart({name:'橋脚 P'+i+' 柱（円柱）', up:true, dia:p.Dc, depth:Hp-hb-pf, pos:[c.x,y+pf+c.up,c.z]}));
-        } else out.push(newPart({name:'橋脚 P'+i+' 柱・梁', depth:tp, yaw, pos:at(tp), pts:[[-Wc/2,pf],[Wc/2,pf],[Wc/2,Hp-hb],[Wb/2,Hp-hb*0.55],[Wb/2,Hp],[-Wb/2,Hp],[-Wb/2,Hp-hb*0.55],[-Wc/2,Hp-hb]]}));
+        } else out.push(newPart({name:'橋脚 P'+i+' 柱・梁', depth:tp, yaw, pos:at(tp), pts:[[-Wc/2,pf],[Wc/2,pf],[Wc/2,Hp-hb],[Wb/2,Hp-hb*0.55+tl],[Wb/2,Hp+tl],[-Wb/2,Hp-tl],[-Wb/2,Hp-hb*0.55-tl],[-Wc/2,Hp-hb]]}));
         out.push(newPart({name:'橋脚 P'+i+' フーチング', depth:fz, yaw, pos:at(fz), pts:rect(-Wc/2-1500,0,Wc/2+1500,pf)}));
       }
       return out; } }

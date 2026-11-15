@@ -370,7 +370,7 @@ const TPL = {
       return [newPart({name:'函体', ...lin(p), sk1:90-(p.sk||90), sk2:90-(p.sk||90), depth:p.L, pts:rect(0,0,W,H), holes:[clean([[x0+h,y0],[x1-h,y0],[x1,y0+h],[x1,y1-h],[x1-h,y1],[x0+h,y1],[x0,y1-h],[x0,y0+h]])]})]; } },
   uch:{ label:'U型水路', f:[['B0','内幅',1500],['H0','内高',1200],['tw','側壁厚',200],['tl','底版厚',250],['L','延長',10000],['R','平面曲線半径（0=直線、負で逆向き）',0,1000],['Ls','緩和曲線長（起終点とも、0=なし）',0,1000],['i','縦断勾配（%、上りが正）',0,0.1]],
     gen:p=>{ const W=p.B0+2*p.tw, H=p.H0+p.tl; return [newPart({name:'U型水路', ...lin(p), depth:p.L, pts:[[0,0],[W,0],[W,H],[W-p.tw,H],[W-p.tw,p.tl],[p.tw,p.tl],[p.tw,H],[0,H]]})]; } },
-  bridge:{ label:'桁橋（橋台・橋脚つき）', f:[['L','橋長',40000],['n','径間数',2,1],['W','全幅員',9000],['ts','床版厚',250],['ng','主桁本数',4,1],['hg','桁高（支間部）',1600],['gt','主桁の形式',0,[[0,'連続桁'],[1,'単純桁（橋脚上で分割）']]],['hg2','中間支点上の桁高（連続桁のみ、0=等断面）',0],['bg','桁幅',450],['cw','地覆幅',400],['ch','地覆高',350],['Ha','橋台高（底面〜桁座）',6000],['Hp','橋脚高（底面〜桁座）',8000],['pc','橋脚の形式',0,[[0,'張出し式（壁柱）'],[1,'張出し式（円柱）']]],['Dc','円柱橋脚の柱径',2500],['bh','支承の高さ（0=なし）',150,10],['bw','支承の平面寸法',500],['sh','沓座（台座）の高さ（0=なし）',150,10],['ab','アンカーボルト径（0=なし）',32,1],['al','アンカーボルト長',600],['fb','変位制限ブロック',1,[[0,'なし'],[1,'あり']]],['fc','落橋防止ケーブル（橋台、単純桁は橋脚上も）',1,[[0,'なし'],[1,'あり']]],['ej','伸縮装置',1,[[0,'なし'],[1,'鋼製フィンガージョイント'],[2,'ゴムジョイント'],[3,'概略の帯のみ']]],['pw','後打ちコンクリートの幅（片側、0=なし）',300,10],['pd','後打ちコンクリートの厚さ',150,10],['ejw','桁端の遊間（伸縮装置ありのとき）',50,10],['dj','橋脚上の床版（単純桁のとき）',0,[[0,'連続（連結床版）'],[1,'目地で分割']]],['R','平面曲線半径（0=直線、負で逆向き）',0,1000],['Ls','緩和曲線長（起終点とも、0=なし）',0,1000],['i1','縦断勾配 起点（%、上りが正）',0,0.1],['i2','縦断勾配 終点（%）',0,0.1],['e','片勾配（%、曲線の内側が下がる）',0,0.5],['sk','斜角（°、90=直角）',90,1]],
+  bridge:{ label:'桁橋（橋台・橋脚つき）', f:[['L','橋長',40000],['n','径間数',2,1],['W','全幅員',9000],['ts','床版厚',250],['ng','主桁本数',4,1],['hg','桁高（支間部）',1600],['gt','主桁の形式',0,[[0,'連続桁'],[1,'単純桁（橋脚上で分割）']]],['hg2','中間支点上の桁高（連続桁のみ、0=等断面）',0],['bg','桁幅',450],['cw','地覆幅',400],['ch','地覆高',350],['Ha','橋台高（底面〜桁座）',6000],['Hp','橋脚高（底面〜桁座）',8000],['pc','橋脚の形式',0,[[0,'張出し式（壁柱）'],[1,'張出し式（円柱）']]],['Dc','円柱橋脚の柱径',2500],['bh','支承の高さ（0=なし）',150,10],['bw','支承の平面寸法',500],['sh','沓座（台座）の高さ（0=なし）',150,10],['ab','アンカーボルト径（0=なし）',32,1],['al','アンカーボルト長',600],['fb','変位制限ブロック',1,[[0,'なし'],[1,'あり']]],['fc','落橋防止ケーブル（橋台、単純桁は橋脚上も）',1,[[0,'なし'],[1,'あり']]],['ej','伸縮装置',1,[[0,'なし'],[1,'鋼製フィンガージョイント'],[2,'ゴムジョイント'],[3,'概略の帯のみ']]],['pw','後打ちコンクリートの幅（片側、0=なし）',300,10],['pd','後打ちコンクリートの厚さ',150,10],['ws','止水材',1,[[0,'なし'],[1,'あり']]],['dt','排水樋',1,[[0,'なし'],[1,'あり']]],['cj','地覆部の継手',1,[[0,'なし'],[1,'あり']]],['ejw','桁端の遊間（伸縮装置ありのとき）',50,10],['dj','橋脚上の床版（単純桁のとき）',0,[[0,'連続（連結床版）'],[1,'目地で分割']]],['R','平面曲線半径（0=直線、負で逆向き）',0,1000],['Ls','緩和曲線長（起終点とも、0=なし）',0,1000],['i1','縦断勾配 起点（%、上りが正）',0,0.1],['i2','縦断勾配 終点（%）',0,0.1],['e','片勾配（%、曲線の内側が下がる）',0,0.5],['sk','斜角（°、90=直角）',90,1]],
     gen:p=>{
       const out=[], n=Math.max(1,Math.round(p.n)), ng=Math.max(1,Math.round(p.ng)), W=p.W, L=p.L, hg=p.hg, simple=Math.round(p.gt)===1&&n>1, hg2=n>1&&!simple&&p.hg2>hg?p.hg2:hg, jg=100, rd=400; // jg: 橋脚上の桁の遊間、rd: 橋脚中心から支承列までの距離
       const bh=Math.max(0,p.bh||0), shh=Math.max(0,p.sh||0), gap=bh+shh;   // 下部工天端と桁下面のあいだ（沓座＋支承）
@@ -469,7 +469,21 @@ const TPL = {
             [[' 起点側',-xc,g0],[' 終点側',-xc+pt,g1-fl]].forEach(([nm,x0,a])=>{ const cnt=Math.max(1,Math.floor((2*xc-fw-(x0+xc))/(2*pt))+1);
               out.push(newPart(Object.assign({name:'伸縮装置 '+tag+' フィンガー'+nm, color:'#22282e', novol:true, pts:rect(x0,Ys-35,x0+fw,Ys+5), s0:a, depth:fl, inst:Array.from({length:cnt},(_,k)=>[k*ds*c.dx,k*ds*c.m,k*ds*c.dz])},lst))); }); }
           else if(ejt===2) band('伸縮装置 '+tag+' ゴム本体',g0-120,g1+120,Ys-60,Ys+5,'#1c1f22',{novol:true});   // ゴムジョイント: 遊間と両側 120mm を覆う
-          else band('伸縮装置 '+tag,g0-75,g1+75,Ys-80,Ys+5,STEEL,{novol:true}); }); }
+          else band('伸縮装置 '+tag,g0-75,g1+75,Ys-80,Ys+5,STEEL,{novol:true});
+          // 止水材: 装置の下で遊間をふさぐゴムの帯（ゴムジョイントは本体が止水を兼ねる）
+          if(Math.round(p.ws)===1&&ejt!==2) band('止水材 '+tag,g0-20,g1+20,Ys-70,Ys-50,'#2b4a63',{novol:true});
+          // 排水樋: 遊間の中、床版下面より下に吊る樋。底板と両側の側板。片勾配があれば低い側へ流れる向きに傾く
+          if(Math.round(p.dt)===1&&g1-g0>=30){ const yb=Yg-200, a=g0+5, wd=g1-g0-10, f=A.pos((g0+g1)/2).f, o=wd-4;
+            out.push(newPart(Object.assign({name:'排水樋 '+tag+' 底板', color:'#6b7783', novol:true, pts:rect(-W/2,yb,W/2,yb+4), s0:a, depth:wd},lst)));
+            out.push(newPart(Object.assign({name:'排水樋 '+tag+' 側板', color:'#6b7783', novol:true, pts:rect(-W/2,yb+4,W/2,yb+120), s0:a, depth:4, inst:[[0,0,0],[Math.sin(f)*o,0,Math.cos(f)*o]]},lst))); }
+          // 地覆部の継手: 地覆の天端と内側面を覆う L 形のカバープレート。橋台では胸壁の上にも地覆を延ばす
+          if(Math.round(p.cj)===1){ const yt=Ys+p.ch, t=6;
+            for(const sd of [-1,1]){ const nm=sd<0?'左':'右', X=v=>sd*v, L5=[[X(xc-t),Ys+5],[X(xc),Ys+5],[X(xc),yt],[X(W/2),yt],[X(W/2),yt+t],[X(xc-t),yt+t]];
+              out.push(newPart(Object.assign({name:'地覆継手カバー '+tag+'（'+nm+'）', color:STEEL, novol:true, pts:L5, s0:g0-100, depth:g1-g0+200},lst)));
+              const curb=rect(sd<0?-W/2:xc, Ys, sd<0?-xc:W/2, yt);
+              if(!sa) out.push(newPart(Object.assign({name:'地覆（'+nm+'） '+tag+' 胸壁上', color:'#d6d9dd', pts:curb, s0:g0-tpw, depth:tpw},lst)));
+              if(!sb) out.push(newPart(Object.assign({name:'地覆（'+nm+'） '+tag+' 胸壁上', color:'#d6d9dd', pts:curb, s0:g1, depth:tpw},lst))); } }
+        }); }
       return out; } }
 };
 const lin = p => ({R:p.R||0, ls1:p.Ls||0, ls2:p.Ls||0, g1:p.i||0, g2:p.i||0, hz:p.hz||null, vt:p.vt||null, se:p.se||null}); // 寸法入力の線形を部材へ渡す
@@ -741,7 +755,7 @@ function aiApply(r){
   const type=String(r.type||'none');
   if(TPL[type]){
     const t=TPL[type], params=tplDefaults(type), got=r.params||{};
-    t.f.forEach(([k,label,def])=>{ const v=['R','i','i1','i2','e'].includes(k)?(typeof got[k]==='number'&&isFinite(got[k])?got[k]:null):posNum(got[k]); const opt=['pw','pd','ej','ejw','dj','gt','H2','hg2','pc','Dc','R','sk','Ls','i','i1','i2','e','bh','bw','sh','ab','al','fb','fc'].includes(k); if(v!==null&&(v>0||opt||k==='toe'||k==='hn'||k==='n1'||k==='n2')){ params[k]=v; rows.push([label,v,basis[k]||basis[label]||'',false]); } else rows.push([label,def,opt?'記載なし。標準の扱い':'読み取れず。仮の値',!opt]); });
+    t.f.forEach(([k,label,def])=>{ const v=['R','i','i1','i2','e'].includes(k)?(typeof got[k]==='number'&&isFinite(got[k])?got[k]:null):posNum(got[k]); const opt=['ws','dt','cj','pw','pd','ej','ejw','dj','gt','H2','hg2','pc','Dc','R','sk','Ls','i','i1','i2','e','bh','bw','sh','ab','al','fb','fc'].includes(k); if(v!==null&&(v>0||opt||k==='toe'||k==='hn'||k==='n1'||k==='n2')){ params[k]=v; rows.push([label,v,basis[k]||basis[label]||'',false]); } else rows.push([label,def,opt?'記載なし。標準の扱い':'読み取れず。仮の値',!opt]); });
     const ga=r.aln&&typeof r.aln==='object'?r.aln:{}; S.tpl={type,params,aln:{hz:fmtSegs(cleanSegs(ga.hz)),vt:fmtSegs(cleanSegs(ga.vt)),se:fmtSegs(cleanSegs(ga.se))}};
     ['hz','vt','se'].forEach((k,i)=>{ if(S.tpl.aln[k]) rows.push([['平面線形','縦断','片勾配'][i]+'の区間', S.tpl.aln[k].split('\n').length+' 区間', '「線形を区間ごとに指定する」に入力', false]); });
     S.parts=S.parts.filter(p=>!p.ai); $('tplType').value=type; buildTplForm();

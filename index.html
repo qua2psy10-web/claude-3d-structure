@@ -185,7 +185,7 @@ button.b:disabled{opacity:.45;cursor:default}
 
     <div class="tab" id="tab-parts" hidden>
       <ul id="plist"></ul>
-      <div class="row"><button class="b" id="addCyl">円柱を追加</button></div>
+      <div class="row"><button class="b" id="addCyl">円柱を追加</button><button class="b" id="addPipe">管を追加</button></div>
       <div id="pedit" hidden style="display:flex;flex-direction:column;gap:10px">
         <h2>選択中の部材</h2>
         <div class="grid2">
@@ -210,6 +210,10 @@ button.b:disabled{opacity:.45;cursor:default}
           <label class="f">位置 Y 高さ (mm)<input type="number" id="eY"></label>
           <label class="f">位置 Z 延長方向 (mm)<input type="number" id="eZ"></label>
         </div>
+        <label class="f" id="ePathL">管の経路（1行に「横X, 高さY, 延長方向Z」mm。上の位置からの相対座標。2点以上）
+          <textarea id="ePath" spellcheck="false"></textarea>
+        </label>
+        <label class="f" id="eBendL" style="width:180px">曲げ半径 (mm、0=折れ線のまま)<input type="number" id="eBend" min="0" step="50"></label>
         <details id="eAlnBox">
           <summary>線形を区間ごとに指定する（S字・複数の曲線・勾配変化点）</summary>
           <div class="dbody">
@@ -893,9 +897,9 @@ function renderParts(){
     $('eName').value=p.name; $('eColor').value=p.color; $('eDepth').value=p.depth; $('eYaw').value=p.yaw;
     $('eX').value=p.pos[0]; $('eY').value=p.pos[1]; $('eZ').value=p.pos[2];
     $('ePts').value=p.pts.map(q=>q[0]+', '+q[1]).join('\n'); $('ePts2').value=(p.pts2||[]).map(q=>q[0]+', '+q[1]).join('\n');
-    $('eUp').value=p.up?1:0; $('eDia').value=p.dia||''; $('eDia2').value=p.dia2||0; $('eR').value=p.R||0; $('eSk1').value=90-(p.sk1||0); $('eSk2').value=90-(p.sk2||0); LINF.forEach(([id,k])=>$(id).value=p[k]||0); SEGF.forEach(([id,k])=>$(id).value=fmtSegs(p[k])); $('eAlnBox').open=!!(p.hz||p.vt||p.se);
+    $('eUp').value=p.up?1:0; $('eDia').value=p.dia||''; $('eDia2').value=p.dia2||0; $('eR').value=p.R||0; $('eSk1').value=90-(p.sk1||0); $('eSk2').value=90-(p.sk2||0); $('ePath').value=(p.path||[]).map(q=>q.map(v=>Math.round(v*10)/10).join(', ')).join('\n'); $('eBend').value=p.bend||0; LINF.forEach(([id,k])=>$(id).value=p[k]||0); SEGF.forEach(([id,k])=>$(id).value=fmtSegs(p[k])); $('eAlnBox').open=!!(p.hz||p.vt||p.se);
   }
-  if(p){ const c=p.dia>0; ['eRL','eSk1L','eSk2L'].concat(LINF.map(x=>x[0]+'L'),['eAlnBox']).forEach(i=>$(i).hidden=!!(p.up||p.path)); ['eDiaL','eDia2L'].forEach(i=>$(i).hidden=!c); ['ePtsL','ePts2L','eApply','eCopy2'].forEach(i=>$(i).hidden=c);
+  if(p){ const c=p.dia>0; ['eRL','eSk1L','eSk2L'].concat(LINF.map(x=>x[0]+'L'),['eAlnBox']).forEach(i=>$(i).hidden=!!(p.up||p.path)); ['eDiaL','eDia2L'].forEach(i=>$(i).hidden=!c); ['ePathL','eBendL'].forEach(i=>$(i).hidden=!p.path); if(p.path){ $('eDia2L').hidden=true; $('eDiaL').firstChild.textContent='直径 (mm)'; } else $('eDiaL').firstChild.textContent='直径・始端 (mm)'; ['ePtsL','ePts2L','eApply','eCopy2'].forEach(i=>$(i).hidden=c);
   }
 }
 function bindEdit(id,fn){ $(id).addEventListener('input',()=>{ const p=S.parts.find(q=>q.id===S.sel); if(!p) return; fn(p,$(id).value); p.tpl=false; changed(false); }); }
@@ -917,6 +921,9 @@ $('eFocus').onclick=()=>{ // 選択中の部材が画面いっぱいになる位
   const bx=new THREE.Box3(); group.children.forEach(m=>{ if(m.userData.id===S.sel) bx.expandByObject(m); }); if(bx.isEmpty()) return toast('この部材は非表示です');
   bx.getCenter(orb.tg); orb.dist=Math.max(0.4,bx.getSize(new THREE.Vector3()).length()*1.3/Math.min(1,cam.aspect)); setMode('3d'); updCam(); };
 $('eCopy2').onclick=()=>{ $('ePts2').value=$('ePts').value; toast('終端側の数値を書き換えて「座標を反映」を押してください'); };
+bindEdit('ePath',(p,v)=>{ const a=v.split(/\n/).map(l=>l.split(/[,\s\t]+/).filter(Boolean).map(Number)).filter(x=>x.length>=3&&x.slice(0,3).every(isFinite)).map(x=>x.slice(0,3)); if(a.length>=2) p.path=a; }); // 2点そろうまでは前の経路のまま
+bindEdit('eBend',(p,v)=>p.bend=Math.max(0,num(v)));
+$('addPipe').onclick=()=>{ const c=newPart({name:'管',dia:100,bend:200,color:'#55616c',novol:true,path:[[0,3000,0],[0,1000,0],[1500,500,0],[1500,0,0]]}); S.parts.push(c); S.sel=c.id; changed(true); };
 $('addCyl').onclick=()=>{ const c=newPart({name:'円柱',up:true,dia:1500,depth:6000}); S.parts.push(c); S.sel=c.id; changed(true); };
 $('eDup').onclick=()=>{ const p=S.parts.find(q=>q.id===S.sel); if(!p) return; const c=newPart(JSON.parse(JSON.stringify(p))); c.id=uid++; c.tpl=false; c.name=p.name+' のコピー'; c.pos[2]+=p.depth; S.parts.push(c); S.sel=c.id; changed(true); };
 

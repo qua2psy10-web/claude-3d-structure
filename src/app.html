@@ -205,7 +205,7 @@ button.b:disabled{opacity:.45;cursor:default}
         <label class="f" id="ePathL">管の経路（1行に「横X, 高さY, 延長方向Z」mm。上の位置からの相対座標。2点以上）
           <textarea id="ePath" spellcheck="false"></textarea>
         </label>
-        <label class="f" id="eSupL">支持金具の位置（管の全長に対する % を、上流側から1行に1つ。空欄で支持金具なし。金具ごとに腕の向きを変えるときは「30, 水平」「30, 最短」「30, なし」のように続けて書く。書かない行は下の「腕の向き」に従う）
+        <label class="f" id="eSupL">支持金具の位置（管の全長に対する % を、上流側から1行に1つ。空欄で支持金具なし。金具ごとに腕の向きを変えるときは「30, 水平」「30, 最短」「30, なし」のように続けて書く。角度で決めるときは「30, 方位°」または「30, 方位°, 仰角°」と書く（方位は延長方向Zを0°、横方向Xを90°とした水平の向き。仰角は上向きが正）。書かない行は下の「腕の向き」に従う）
           <textarea id="eSup" spellcheck="false" style="min-height:76px"></textarea>
         </label>
         <label class="chk" id="eArmAutoL"><input type="checkbox" id="eArmAuto">腕を、いちばん近い構造物の表面へ伸ばす（斜めの面・曲面にも垂直に当たる）</label>
@@ -340,6 +340,13 @@ function nearestLevel(solids,w,maxD){ // 点 w と同じ高さで、いちばん
       if(d<best){ best=d; bp=new THREE.Vector3(qx,y,qz); } } }
   return bp;
 }
+function rayHit(solids,w,d,maxD){ // 点 w から向き d（単位ベクトル）へ進み、最初に当たる表面上の点。maxD までに当たらなければ null
+  const ray=new THREE.Ray(w,d), a=new THREE.Vector3(), b=new THREE.Vector3(), c=new THREE.Vector3(), out=new THREE.Vector3(); let best=maxD, bp=null;
+  for(const so of solids){ if(!ray.intersectsBox(so.box)) continue; const t=so.tris;
+    for(let i=0;i<t.length;i+=9){ a.set(t[i],t[i+1],t[i+2]); b.set(t[i+3],t[i+4],t[i+5]); c.set(t[i+6],t[i+7],t[i+8]);
+      if(ray.intersectTriangle(a,b,c,false,out)){ const dd=out.distanceTo(w); if(dd<best){ best=dd; bp=out.clone(); } } } }
+  return bp;
+}
 function supGeom(p){
   const C=tubeLine(p), cum=[0]; for(let i=1;i<C.length;i++) cum.push(cum[i-1]+C[i].distanceTo(C[i-1]));
   const tot=cum[cum.length-1], pos=[], r=p.dia/2000; if(!(tot>0)) return null;
@@ -353,6 +360,8 @@ function supGeom(p){
     const w=Q.clone().applyMatrix4(M), dist=f=>f.face/1000-(w.x*f.dx+w.z*f.dz), yy=w.y*1000, ends=[];
     const md=sp.mode||(p.armAuto?(p.armLevel?'level':'near'):'');   // 金具ごとの指定（near=最短, level=水平, none=腕なし）があれば、管の設定より優先
     if(md==='none'){}
+    else if(sp.dir){ const az=sp.dir.az*Math.PI/180, el=(sp.dir.el||0)*Math.PI/180;   // 角度の指定: 方位 az（Z=0°, X=90°）と仰角 el（上向きが正）の向きへ、表面に当たるまで伸ばす
+      const e=rayHit(SOLIDS,w,new THREE.Vector3(Math.sin(az)*Math.cos(el),Math.sin(el),Math.cos(az)*Math.cos(el)),Math.max(0,+p.armMax||3500)/1000); if(e) ends.push(e); }
     else if(sp.arm) ends.push(w.clone().add(new THREE.Vector3(sp.arm.dx*dist(sp.arm),0,sp.arm.dz*dist(sp.arm))));
     else { if(md){ const e=(md==='level'?nearestLevel:nearestOn)(SOLIDS,w,Math.max(0,+p.armMax||3500)/1000); if(e) ends.push(e); }
       (p.faces||[]).forEach(f=>{ if(yy>=f.y0&&yy<=f.y1&&dist(f)>0) ends.push(w.clone().add(new THREE.Vector3(f.dx*dist(f),0,f.dz*dist(f)))); }); }
@@ -955,7 +964,7 @@ function renderParts(){
     $('eName').value=p.name; $('eColor').value=p.color; $('eDepth').value=p.depth; $('eYaw').value=p.yaw;
     $('eX').value=p.pos[0]; $('eY').value=p.pos[1]; $('eZ').value=p.pos[2];
     $('ePts').value=p.pts.map(q=>q[0]+', '+q[1]).join('\n'); $('ePts2').value=(p.pts2||[]).map(q=>q[0]+', '+q[1]).join('\n');
-    $('eUp').value=p.up?1:0; $('eDia').value=p.dia||''; $('eDia2').value=p.dia2||0; $('eR').value=p.R||0; $('eSk1').value=90-(p.sk1||0); $('eSk2').value=90-(p.sk2||0); $('ePath').value=(p.path||[]).map(q=>q.map(v=>Math.round(v*10)/10).join(', ')).join('\n'); $('eBend').value=p.bend||0; $('eArmAuto').checked=!!p.armAuto; $('eArmMax').value=p.armMax||3500; $('eArmLevel').value=p.armLevel?1:0; $('eSup').value=(p.sup||[]).map(x=>Math.round(x.t*1000)/10+(x.mode?', '+ARM_LABEL[x.mode]:'')).join('\n'); $('eFaces').value=(p.faces||[]).map(f=>[Math.round(Math.atan2(f.dx,f.dz)*1800/Math.PI)/10,Math.round(f.face),Math.round(f.y0),Math.round(f.y1)].join(', ')).join('\n'); LINF.forEach(([id,k])=>$(id).value=p[k]||0); SEGF.forEach(([id,k])=>$(id).value=fmtSegs(p[k])); $('eAlnBox').open=!!(p.hz||p.vt||p.se);
+    $('eUp').value=p.up?1:0; $('eDia').value=p.dia||''; $('eDia2').value=p.dia2||0; $('eR').value=p.R||0; $('eSk1').value=90-(p.sk1||0); $('eSk2').value=90-(p.sk2||0); $('ePath').value=(p.path||[]).map(q=>q.map(v=>Math.round(v*10)/10).join(', ')).join('\n'); $('eBend').value=p.bend||0; $('eArmAuto').checked=!!p.armAuto; $('eArmMax').value=p.armMax||3500; $('eArmLevel').value=p.armLevel?1:0; $('eSup').value=(p.sup||[]).map(x=>Math.round(x.t*1000)/10+(x.mode?', '+ARM_LABEL[x.mode]:x.dir?', '+x.dir.az+'°'+(x.dir.el?', '+x.dir.el+'°':''):'')).join('\n'); $('eFaces').value=(p.faces||[]).map(f=>[Math.round(Math.atan2(f.dx,f.dz)*1800/Math.PI)/10,Math.round(f.face),Math.round(f.y0),Math.round(f.y1)].join(', ')).join('\n'); LINF.forEach(([id,k])=>$(id).value=p[k]||0); SEGF.forEach(([id,k])=>$(id).value=fmtSegs(p[k])); $('eAlnBox').open=!!(p.hz||p.vt||p.se);
   }
   if(p){ const c=p.dia>0; ['eRL','eSk1L','eSk2L'].concat(LINF.map(x=>x[0]+'L'),['eAlnBox']).forEach(i=>$(i).hidden=!!(p.up||p.path)); ['eDiaL','eDia2L'].forEach(i=>$(i).hidden=!c); ['ePathL','eBendL','eSupL','eFacesL','eArmAutoL','eArmMaxL','eArmLevelL'].forEach(i=>$(i).hidden=!p.path); if(p.path){ $('eDia2L').hidden=true; $('eDiaL').firstChild.textContent='直径 (mm)'; } else $('eDiaL').firstChild.textContent='直径・始端 (mm)'; ['ePtsL','ePts2L','eApply','eCopy2'].forEach(i=>$(i).hidden=c);
   }
@@ -984,7 +993,8 @@ bindEdit('ePath',(p,v)=>{ const a=v.split(/\n/).map(l=>l.split(/[,\s\t]+/).filte
 const ARM_WORDS=[['level',/水平|すいへい|level|^h$/i],['near',/最短|垂直|near|^n$/i],['none',/なし|無し|none|^x$/i]], ARM_LABEL={level:'水平',near:'最短',none:'なし'};
 bindEdit('eSup',(p,v)=>{ const old=p.sup||[], own=p.armAuto||(p.faces&&p.faces.length); // 1行に「位置%」、続けて腕の向き（水平・最短・なし）を書ける。向きを書かない行は管の設定に従う
   p.sup=v.split(/\n/).map(l=>l.split(/[,、\s\t]+/).filter(Boolean)).filter(a=>a.length&&isFinite(Number(a[0]))).map((a,i)=>{ const o={t:Math.max(0,Math.min(100,Number(a[0])))/100};
-    const md=a[1]&&ARM_WORDS.find(w=>w[1].test(a[1])); if(md) o.mode=md[0]; else if(!own&&(old[i]||{}).arm) o.arm=old[i].arm; return o; }); });
+    const md=a[1]&&ARM_WORDS.find(w=>w[1].test(a[1])), ang=x=>x!==undefined&&/^-?\d+(\.\d+)?°?$/.test(x)?parseFloat(x):null;
+    if(md) o.mode=md[0]; else if(ang(a[1])!==null) o.dir={az:ang(a[1]),el:Math.max(-89,Math.min(89,ang(a[2])||0))}; else if(!own&&(old[i]||{}).arm) o.arm=old[i].arm; return o; }); });
 bindEdit('eFaces',(p,v)=>{ p.faces=v.split(/\n/).map(l=>l.split(/[,\s\t]+/).filter(Boolean).map(Number)).filter(a=>a.length>=2&&a.slice(0,2).every(isFinite))
   .map(a=>({dx:Math.sin(a[0]*Math.PI/180),dz:Math.cos(a[0]*Math.PI/180),face:a[1],y0:isFinite(a[2])?a[2]:-1e6,y1:isFinite(a[3])?a[3]:1e6})); (p.sup||[]).forEach(x=>delete x.arm); });
 $('eArmAuto').addEventListener('change',()=>{ const p=S.parts.find(q=>q.id===S.sel); if(!p) return; p.armAuto=$('eArmAuto').checked; (p.sup||[]).forEach(x=>delete x.arm); p.tpl=false; p.edited=true; changed(false); });
@@ -1001,7 +1011,7 @@ function importData(o){
   if(!o||!Array.isArray(o.parts)) throw new Error('format');
   S.name=String(o.name||''); S.sel=null;
   const P2=a=>Array.isArray(a)?a.map(q=>[+q[0]||0,+q[1]||0]):null;
-  S.parts=o.parts.filter(p=>Array.isArray(p.pts)&&(p.pts.length>=3||+p.dia>0)).map(p=>newPart({armLevel:!!p.armLevel,armAuto:!!p.armAuto,armMax:+p.armMax>0?+p.armMax:3500,faces:Array.isArray(p.faces)?p.faces.filter(f=>f&&[f.dx,f.dz,f.face,f.y0,f.y1].every(v=>isFinite(+v))).map(f=>({dx:+f.dx,dz:+f.dz,face:+f.face,y0:+f.y0,y1:+f.y1})):null,edited:!!p.edited,sup:Array.isArray(p.sup)?p.sup.filter(x=>x&&isFinite(+x.t)).map(x=>({t:+x.t,...(['near','level','none'].includes(x.mode)?{mode:x.mode}:{}),arm:x.arm&&isFinite(+x.arm.dx)&&isFinite(+x.arm.dz)&&isFinite(+x.arm.face)?{dx:+x.arm.dx,dz:+x.arm.dz,face:+x.arm.face}:null})):null,path:Array.isArray(p.path)&&p.path.length>1?p.path.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,bend:Math.max(0,+p.bend||0),s0:+p.s0||0,novol:!!p.novol,inst:Array.isArray(p.inst)&&p.inst.length?p.inst.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,hz:cleanSegs(p.hz),vt:cleanSegs(p.vt),se:cleanSegs(p.se),R:+p.R||0,ls1:Math.max(0,+p.ls1||0),ls2:Math.max(0,+p.ls2||0),g1:+p.g1||0,g2:+p.g2||0,e1:+p.e1||0,e2:+p.e2||0,sk1:+p.sk1||0,sk2:+p.sk2||0,secs:Array.isArray(p.secs)&&p.secs.every(x=>Array.isArray(x)&&isFinite(+x[0])&&Array.isArray(x[1])&&x[1].length===p.pts.length)?p.secs.map(x=>[+x[0],P2(x[1])]):null,up:!!p.up,dia:+p.dia>0?+p.dia:0,dia2:+p.dia2>0?+p.dia2:0,pts2:P2(p.pts2)&&p.pts2.length===p.pts.length?P2(p.pts2):null,name:String(p.name||'部材'),color:/^#[0-9a-f]{6}$/i.test(p.color)?p.color:CONCRETE,pts:P2(p.pts),holes:(p.holes||[]).map(h=>clean(h.map(q=>[+q[0]||0,+q[1]||0]))).filter(h=>h.length>=3),depth:+p.depth>0?+p.depth:1000,pos:[0,1,2].map(i=>+(p.pos||[])[i]||0),yaw:+p.yaw||0,tpl:!!p.tpl,hidden:!!p.hidden,torg:p.torg,ai:!!p.ai}));
+  S.parts=o.parts.filter(p=>Array.isArray(p.pts)&&(p.pts.length>=3||+p.dia>0)).map(p=>newPart({armLevel:!!p.armLevel,armAuto:!!p.armAuto,armMax:+p.armMax>0?+p.armMax:3500,faces:Array.isArray(p.faces)?p.faces.filter(f=>f&&[f.dx,f.dz,f.face,f.y0,f.y1].every(v=>isFinite(+v))).map(f=>({dx:+f.dx,dz:+f.dz,face:+f.face,y0:+f.y0,y1:+f.y1})):null,edited:!!p.edited,sup:Array.isArray(p.sup)?p.sup.filter(x=>x&&isFinite(+x.t)).map(x=>({t:+x.t,...(['near','level','none'].includes(x.mode)?{mode:x.mode}:{}),...(x.dir&&isFinite(+x.dir.az)?{dir:{az:+x.dir.az,el:Math.max(-89,Math.min(89,+x.dir.el||0))}}:{}),arm:x.arm&&isFinite(+x.arm.dx)&&isFinite(+x.arm.dz)&&isFinite(+x.arm.face)?{dx:+x.arm.dx,dz:+x.arm.dz,face:+x.arm.face}:null})):null,path:Array.isArray(p.path)&&p.path.length>1?p.path.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,bend:Math.max(0,+p.bend||0),s0:+p.s0||0,novol:!!p.novol,inst:Array.isArray(p.inst)&&p.inst.length?p.inst.filter(Array.isArray).map(q=>[+q[0]||0,+q[1]||0,+q[2]||0]):null,hz:cleanSegs(p.hz),vt:cleanSegs(p.vt),se:cleanSegs(p.se),R:+p.R||0,ls1:Math.max(0,+p.ls1||0),ls2:Math.max(0,+p.ls2||0),g1:+p.g1||0,g2:+p.g2||0,e1:+p.e1||0,e2:+p.e2||0,sk1:+p.sk1||0,sk2:+p.sk2||0,secs:Array.isArray(p.secs)&&p.secs.every(x=>Array.isArray(x)&&isFinite(+x[0])&&Array.isArray(x[1])&&x[1].length===p.pts.length)?p.secs.map(x=>[+x[0],P2(x[1])]):null,up:!!p.up,dia:+p.dia>0?+p.dia:0,dia2:+p.dia2>0?+p.dia2:0,pts2:P2(p.pts2)&&p.pts2.length===p.pts.length?P2(p.pts2):null,name:String(p.name||'部材'),color:/^#[0-9a-f]{6}$/i.test(p.color)?p.color:CONCRETE,pts:P2(p.pts),holes:(p.holes||[]).map(h=>clean(h.map(q=>[+q[0]||0,+q[1]||0]))).filter(h=>h.length>=3),depth:+p.depth>0?+p.depth:1000,pos:[0,1,2].map(i=>+(p.pos||[])[i]||0),yaw:+p.yaw||0,tpl:!!p.tpl,hidden:!!p.hidden,torg:p.torg,ai:!!p.ai}));
   if(o.tpl&&TPL[o.tpl.type]){ const a=o.tpl.aln||{}; S.tpl={type:o.tpl.type,params:Object.assign(tplDefaults(o.tpl.type),o.tpl.params),aln:{hz:String(a.hz||''),vt:String(a.vt||''),se:String(a.se||'')}}; }
   $('pname').value=S.name; $('tplType').value=S.tpl.type; buildTplForm();
 }
@@ -1075,6 +1085,6 @@ let restored=false;
 try{ const s=localStorage.getItem('kozo3d.v1'); if(s){ importData(JSON.parse(s)); restored=true; } }catch(_){}
 if(!restored){ S.tpl.params=tplDefaults('retT'); $('pname').value=S.name; $('tplType').value='retT'; buildTplForm(); S.parts=TPL.retT.gen(S.tpl.params); S.parts.forEach(p=>p.tpl=true); }
 resize(); changed(true);
-window.__kozo={S,T,supGeom,nearest:(w,d)=>nearestOn(SOLIDS,w,d),level:(w,d)=>nearestLevel(SOLIDS,w,d),aiPrompt,makeObj,makeStl,zip1,exportData};
+window.__kozo={S,T,supGeom,nearest:(w,d)=>nearestOn(SOLIDS,w,d),level:(w,d)=>nearestLevel(SOLIDS,w,d),ray:(w,az,el,d)=>{ const a=az*Math.PI/180,e=el*Math.PI/180; return rayHit(SOLIDS,w,new THREE.Vector3(Math.sin(a)*Math.cos(e),Math.sin(e),Math.cos(a)*Math.cos(e)),d); },aiPrompt,makeObj,makeStl,zip1,exportData};
 })();
 </script>
